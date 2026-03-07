@@ -44,14 +44,19 @@ def build_login_dialog(cookie_validator):
     return OfficialLoginDialog(cookie_validator=cookie_validator)
 
 
-def main() -> None:
-    app = create_app()
+def build_main_window() -> MainWindow:
     window = MainWindow()
-    MainWindowController(
+    window._controller = MainWindowController(
         window=window,
         refresh_service_factory=build_refresh_service,
         login_dialog_factory=build_login_dialog,
         upload_executor_factory=lambda: build_upload_executor(window.cookie_input.text().strip()),
     )
+    return window
+
+
+def main() -> None:
+    app = create_app()
+    window = build_main_window()
     window.show()
     app.exec()

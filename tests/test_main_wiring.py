@@ -1,4 +1,5 @@
-from quark_uploader.main import build_upload_executor
+from quark_uploader.app import create_app
+from quark_uploader.main import build_main_window, build_upload_executor
 
 
 def test_build_upload_executor_returns_engine_with_execute_job():
@@ -6,3 +7,10 @@ def test_build_upload_executor_returns_engine_with_execute_job():
     assert hasattr(engine, "execute_job")
     assert engine.share_service is not None
     assert engine.share_service.result_writer is not None
+
+
+def test_build_main_window_keeps_controller_alive():
+    create_app()
+    window = build_main_window()
+    assert hasattr(window, "_controller")
+    assert window._controller is not None
