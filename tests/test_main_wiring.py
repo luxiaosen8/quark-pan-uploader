@@ -14,3 +14,11 @@ def test_build_main_window_keeps_controller_alive():
     window = build_main_window()
     assert hasattr(window, "_controller")
     assert window._controller is not None
+
+
+def test_build_upload_executor_accepts_logger_callback():
+    logs = []
+    engine = build_upload_executor("sid=123", logger=logs.append)
+    engine.uploader._log("hello-uploader")
+    engine.share_service._log("hello-share")
+    assert logs == ["hello-uploader", "hello-share"]

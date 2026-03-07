@@ -30,30 +30,40 @@ MULTIPART_CHUNK_SIZE = 4 * 1024 * 1024
 
 
 class QuarkFileUploader:
-    def __init__(self, upload_api, oss_transport=None) -> None:
+    def __init__(self, upload_api, oss_transport=None, logger=None) -> None:
         self.upload_api = upload_api
         self.oss_transport = oss_transport or RequestsOssTransport()
+        self.logger = logger
+
+    def _log(self, message: str) -> None:
+        if self.logger is not None:
+            self.logger(message)
 
     def upload_file(self, file_entry: LocalFileEntry, target_parent_fid: str):
         path = Path(file_entry.absolute_path)
+        self._log(f"[DEBUG] 文件上传开始：name={path.name} size={file_entry.size_bytes} target_parent_fid={target_parent_fid}")
         mime_type, _ = mimetypes.guess_type(str(path))
         mime_type = mime_type or "application/octet-stream"
         md5_hash, sha1_hash = self._calculate_hashes(path)
+        self._log(f"[DEBUG] 文件哈希已计算：md5={md5_hash[:8]}... sha1={sha1_hash[:8]}...")
         pre_payload = build_upload_pre_payload(
             file_name=path.name,
             file_size=file_entry.size_bytes,
             parent_fid=target_parent_fid,
             mime_type=mime_type,
         )
+        self._log(f"[DEBUG] 预上传请求：file={path.name} size={file_entry.size_bytes}")
         pre_result = self.upload_api.preupload(pre_payload)
         data = pre_result.get("data", {})
         task_id = data.get("task_id", "")
-        auth_info = data.get("auth_info", "")
-        obj_key = data.get("obj_key", "")
         upload_id = data.get("upload_id", "")
         bucket = data.get("bucket", "ul-zb")
+        self._log(f"[DEBUG] 预上传成功：task_id={task_id} upload_id={upload_id} bucket={bucket}")
+        auth_info = data.get("auth_info", "")
+        obj_key = data.get("obj_key", "")
         callback_info = data.get("callback") or {}
         self.upload_api.update_hash(build_hash_update_payload(task_id, md5_hash, sha1_hash))
+        self._log(f"[DEBUG] 更新哈希完成：task_id={task_id}")
 
         auth_result = None
         oss_upload = None
@@ -82,7 +92,9 @@ class QuarkFileUploader:
                     callback_info=callback_info,
                 )
 
+        self._log(f"[DEBUG] 调用 finish：task_id={task_id} obj_key={obj_key}")
         finish_result = self.upload_api.finish(build_upload_finish_payload(task_id, obj_key or None))
+        self._log(f"[DEBUG] finish 完成：task_id={task_id}")
         return {
             "task_id": task_id,
             "preupload": pre_result,
@@ -103,6 +115,7 @@ class QuarkFileUploader:
             part_number=1,
             user_agent=DEFAULT_OSS_USER_AGENT,
         )
+        self._log(f"[DEBUG] 获取单分片上传授权：part=1 upload_id={upload_id}")
         auth_result = self.upload_api.get_upload_auth(
             build_upload_auth_payload(task_id=task_id, auth_info=auth_info, auth_meta=auth_meta)
         )
@@ -116,6 +129,7 @@ class QuarkFileUploader:
             user_agent=DEFAULT_OSS_USER_AGENT,
         )
         oss_upload = self.oss_transport.upload_single_part(path, parsed_auth["upload_url"], parsed_auth["headers"])
+        self._log(f"[DEBUG] 单分片上传完成：etag={oss_upload.get('etag', '')}")
         xml_data = build_complete_multipart_xml([oss_upload["etag"]])
         complete_oss_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
         complete_auth_meta = build_post_complete_auth_meta(
@@ -127,6 +141,7 @@ class QuarkFileUploader:
             callback_info=callback_info,
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
+        self._log("[DEBUG] 获取单分片合并授权")
         complete_auth_result = self.upload_api.get_upload_auth(
             build_upload_auth_payload(task_id=task_id, auth_info=auth_info, auth_meta=complete_auth_meta)
         )
@@ -140,6 +155,7 @@ class QuarkFileUploader:
             oss_date=complete_oss_date,
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
+        self._log("[DEBUG] 单分片开始执行 OSS 合并完成")
         multipart_complete = self.oss_transport.complete_multipart_upload(
             parsed_complete["upload_url"], parsed_complete["headers"], xml_data
         )
@@ -153,10 +169,12 @@ class QuarkFileUploader:
         file_size = path.stat().st_size
         offset = 0
         part_number = 1
+        self._log(f"[DEBUG] 进入多分片上传：file_size={file_size} chunk_size={MULTIPART_CHUNK_SIZE}")
         while offset < file_size:
             part_size = min(MULTIPART_CHUNK_SIZE, file_size - offset)
             oss_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
             hash_ctx = self._calculate_incremental_hash_context(path, part_number) if part_number > 1 else ""
+            self._log(f"[DEBUG] 获取分片上传授权：part={part_number} offset={offset} size={part_size} hash_ctx={'yes' if hash_ctx else 'no'}")
             auth_meta = build_put_auth_meta(
                 mime_type=mime_type,
                 oss_date=oss_date,
@@ -182,6 +200,7 @@ class QuarkFileUploader:
                 hash_ctx=hash_ctx,
             )
             put_result = self.oss_transport.upload_part(path, parsed_auth["upload_url"], parsed_auth["headers"], offset=offset, size=part_size)
+            self._log(f"[DEBUG] 分片上传完成：part={part_number} etag={put_result.get('etag', '')}")
             part_etags.append(put_result["etag"])
             offset += part_size
             part_number += 1
@@ -196,6 +215,7 @@ class QuarkFileUploader:
             callback_info=callback_info,
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
+        self._log(f"[DEBUG] 获取多分片合并授权：parts={len(part_etags)}")
         complete_auth_result = self.upload_api.get_upload_auth(
             build_upload_auth_payload(task_id=task_id, auth_info=auth_info, auth_meta=complete_auth_meta)
         )
@@ -209,6 +229,7 @@ class QuarkFileUploader:
             oss_date=complete_oss_date,
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
+        self._log("[DEBUG] 开始执行多分片 OSS 合并完成")
         multipart_complete = self.oss_transport.complete_multipart_upload(
             parsed_complete["upload_url"], parsed_complete["headers"], xml_data
         )

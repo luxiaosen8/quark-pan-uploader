@@ -26,17 +26,17 @@ def build_refresh_service(cookie: str) -> DriveRefreshService:
     return DriveRefreshService(user_api=QuarkUserApi(session), file_api=QuarkFileApi(session))
 
 
-def build_upload_executor(cookie: str) -> UploadExecutionEngine:
+def build_upload_executor(cookie: str, logger=None) -> UploadExecutionEngine:
     session = QuarkSession(cookie=cookie)
     file_api = QuarkFileApi(session)
     upload_api = QuarkUploadApi(session)
     share_api = QuarkShareApi(session)
     task_api = QuarkTaskApi(session)
     result_writer = ResultWriter(Path("output"))
-    share_service = QuarkShareService(share_api=share_api, task_api=task_api, result_writer=result_writer)
+    share_service = QuarkShareService(share_api=share_api, task_api=task_api, result_writer=result_writer, logger=logger)
     return UploadExecutionEngine(
         directory_sync_service=RemoteDirectorySyncService(file_api),
-        uploader=QuarkFileUploader(upload_api=upload_api),
+        uploader=QuarkFileUploader(upload_api=upload_api, logger=logger),
         share_service=share_service,
     )
 
@@ -55,7 +55,7 @@ def build_main_window() -> MainWindow:
         window=window,
         refresh_service_factory=build_refresh_service,
         login_dialog_factory=build_login_dialog,
-        upload_executor_factory=lambda: build_upload_executor(window.cookie_input.text().strip()),
+        upload_executor_factory=lambda: build_upload_executor(window.cookie_input.text().strip(), logger=window.append_log),
         settings_store=build_settings_store(),
     )
     return window

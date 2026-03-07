@@ -98,3 +98,21 @@ def test_quark_file_uploader_executes_multipart_upload_flow(tmp_path: Path):
     assert "x-oss-hash-ctx:" in upload_api.calls[3][1]["auth_meta"]
     assert len(oss_transport.post_calls) == 1
     assert result["multipart_complete"] == {"ok": True}
+
+
+
+def test_quark_file_uploader_emits_debug_logs_for_single_part_flow(tmp_path: Path):
+    file_path = tmp_path / "cover.txt"
+    file_path.write_text("12", encoding="utf-8")
+    upload_api = FakeUploadApi()
+    oss_transport = FakeOssTransport()
+    logs = []
+    uploader = QuarkFileUploader(upload_api=upload_api, oss_transport=oss_transport, logger=logs.append)
+    entry = LocalFileEntry(local_name="课程A", absolute_path=str(file_path), relative_path="cover.txt", size_bytes=2)
+
+    uploader.upload_file(entry, target_parent_fid="root-fid")
+
+    assert any("文件上传开始" in line for line in logs)
+    assert any("预上传成功" in line for line in logs)
+    assert any("单分片上传完成" in line for line in logs)
+    assert any("finish 完成" in line for line in logs)

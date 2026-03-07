@@ -35,3 +35,17 @@ def test_quark_share_service_creates_share_polls_task_and_writes_link(tmp_path: 
     assert result.share_id == "share-1"
     assert result.share_url == "https://pan.quark.cn/s/abc123"
     assert (tmp_path / "share_links.txt").read_text(encoding="utf-8").splitlines() == ["https://pan.quark.cn/s/abc123"]
+
+
+
+def test_quark_share_service_emits_debug_logs(tmp_path: Path):
+    writer = ResultWriter(tmp_path)
+    logs = []
+    service = QuarkShareService(share_api=FakeShareApi(), task_api=FakeTaskApi(), result_writer=writer, logger=logs.append)
+
+    service.create_share_for_folder(fid="root-fid", title="课程A")
+
+    assert any("开始创建分享" in line for line in logs)
+    assert any("分享任务已创建" in line for line in logs)
+    assert any("分享轮询成功" in line for line in logs)
+    assert any("分享链接已写入" in line for line in logs)
