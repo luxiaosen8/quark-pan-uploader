@@ -65,6 +65,17 @@ def test_file_api_list_directory_calls_sort_endpoint():
     assert http.calls[0]["params"]["pdir_fid"] == "root-fid"
 
 
+def test_file_api_create_directory_calls_file_endpoint():
+    http = DummyHTTP()
+    session = QuarkSession(cookie="sid=123", http=http)
+
+    QuarkFileApi(session).create_directory("root-fid", "课程A")
+
+    assert http.calls[0]["method"] == "POST"
+    assert http.calls[0]["url"].endswith("/1/clouddrive/file")
+    assert http.calls[0]["json"]["file_name"] == "课程A"
+
+
 def test_upload_api_preupload_uses_post_json_payload():
     http = DummyHTTP()
     session = QuarkSession(cookie="sid=123", http=http)
@@ -74,6 +85,26 @@ def test_upload_api_preupload_uses_post_json_payload():
     assert http.calls[0]["method"] == "POST"
     assert http.calls[0]["url"].endswith("/1/clouddrive/file/upload/pre")
     assert http.calls[0]["json"]["file_name"] == "demo.txt"
+
+
+def test_upload_api_update_hash_calls_update_hash_endpoint():
+    http = DummyHTTP()
+    session = QuarkSession(cookie="sid=123", http=http)
+
+    QuarkUploadApi(session).update_hash({"task_id": "task-1"})
+
+    assert http.calls[0]["method"] == "POST"
+    assert http.calls[0]["url"].endswith("/1/clouddrive/file/update/hash")
+
+
+def test_upload_api_get_auth_calls_upload_auth_endpoint():
+    http = DummyHTTP()
+    session = QuarkSession(cookie="sid=123", http=http)
+
+    QuarkUploadApi(session).get_upload_auth({"task_id": "task-1"})
+
+    assert http.calls[0]["method"] == "POST"
+    assert http.calls[0]["url"].endswith("/1/clouddrive/file/upload/auth")
 
 
 def test_share_api_create_share_uses_post_json_payload():
