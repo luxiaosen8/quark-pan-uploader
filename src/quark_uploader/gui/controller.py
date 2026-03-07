@@ -119,7 +119,9 @@ class MainWindowController:
                     self.window.update_task_status(job.local_name, "failed")
                     self.window.append_log(f"[ERROR] 上传失败：{job.local_name} -> {exc}")
                     continue
-                self.window.update_task_status(job.local_name, "completed")
+                self.window.update_task_status(job.local_name, "completed", getattr(result, "share_url", ""))
                 self.window.append_log(
                     f"[INFO] 上传骨架执行完成：{job.local_name} ({result.uploaded_files} 文件)"
                 )
+                if getattr(result, "share_url", ""):
+                    self.window.append_log(f"[INFO] 分享链接：{result.share_url}")

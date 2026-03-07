@@ -5,6 +5,6 @@ def build_share_payload(fid: str, title: str) -> dict:
     return {
         "fid_list": [fid],
         "title": title,
-        "url_type": 2,
+        "url_type": 1,
         "expired_type": 1,
     }
