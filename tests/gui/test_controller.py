@@ -140,18 +140,22 @@ def test_open_official_login_logs_error_when_dialog_factory_raises(qtbot):
     assert "官方登录窗口打开失败：boom" in window.log_output.toPlainText()
 
 
-def test_open_official_login_assigns_window_as_dialog_parent(qtbot):
+def test_open_official_login_passes_window_to_dialog_factory(qtbot):
     create_app()
     window = MainWindow()
     qtbot.addWidget(window)
-    dialog = TrackingLoginDialog(None)
+    record = {}
+
+    def login_factory(on_success, parent=None):
+        record["parent"] = parent
+        return TrackingLoginDialog(None)
 
     controller = MainWindowController(
         window=window,
         refresh_service_factory=lambda cookie: FakeRefreshService(),
-        login_dialog_factory=lambda on_success: dialog,
+        login_dialog_factory=login_factory,
     )
 
     controller.open_official_login()
 
-    assert dialog.parent() is window
+    assert record["parent"] is window

@@ -65,9 +65,10 @@ class MainWindowController:
     def open_official_login(self) -> None:
         self.window.append_log("[INFO] 正在打开官方登录窗口...")
         try:
-            dialog = self.login_dialog_factory(self.validate_cookie_string)
-            if hasattr(dialog, "setParent"):
-                dialog.setParent(self.window)
+            try:
+                dialog = self.login_dialog_factory(self.validate_cookie_string, self.window)
+            except TypeError:
+                dialog = self.login_dialog_factory(self.validate_cookie_string)
             if hasattr(dialog, "setWindowTitle"):
                 dialog.setWindowTitle(getattr(dialog, "windowTitle", lambda: "官方登录")())
             if hasattr(dialog, "setModal"):
