@@ -17,6 +17,7 @@ class FakeUploadApi:
                 "obj_key": "obj-key",
                 "upload_id": "upload-1",
                 "bucket": "ul-zb",
+                "callback": {"callbackUrl": "https://example.com/callback", "callbackBody": "x"},
             }
         }
 
@@ -25,7 +26,9 @@ class FakeUploadApi:
         return {"data": {"ok": True}}
 
     def get_upload_auth(self, payload):
-        self.calls.append(("get_upload_auth", payload))
+        auth_meta = payload["auth_meta"]
+        phase = "get_upload_auth_complete" if auth_meta.startswith("POST") else "get_upload_auth"
+        self.calls.append((phase, payload))
         return {"data": {"auth_key": "AUTH"}}
 
     def finish(self, payload):
@@ -35,11 +38,20 @@ class FakeUploadApi:
 
 class FakeOssTransport:
     def __init__(self):
-        self.calls = []
+        self.put_calls = []
+        self.post_calls = []
 
     def upload_single_part(self, file_path, upload_url: str, headers: dict):
-        self.calls.append((str(file_path), upload_url, headers.get("authorization")))
+        self.put_calls.append((str(file_path), upload_url, headers.get("authorization")))
         return {"etag": "etag-1"}
+
+    def upload_part(self, file_path, upload_url: str, headers: dict, offset: int, size: int):
+        self.put_calls.append((str(file_path), upload_url, headers.get("authorization"), offset, size))
+        return {"etag": f"etag-{len(self.put_calls)}"}
+
+    def complete_multipart_upload(self, upload_url: str, headers: dict, xml_data: str):
+        self.post_calls.append((upload_url, headers.get("authorization"), xml_data))
+        return {"ok": True}
 
 
 def test_quark_file_uploader_executes_single_part_upload_flow(tmp_path: Path):
@@ -53,14 +65,13 @@ def test_quark_file_uploader_executes_single_part_upload_flow(tmp_path: Path):
     result = uploader.upload_file(entry, target_parent_fid="root-fid")
 
     assert [name for name, _ in upload_api.calls] == ["preupload", "update_hash", "get_upload_auth", "finish"]
-    assert oss_transport.calls[0][1] == "https://ul-zb.pds.quark.cn/obj-key?partNumber=1&uploadId=upload-1"
-    assert oss_transport.calls[0][2] == "AUTH"
+    assert oss_transport.put_calls[0][1] == "https://ul-zb.pds.quark.cn/obj-key?partNumber=1&uploadId=upload-1"
+    assert oss_transport.put_calls[0][2] == "AUTH"
     assert result["task_id"] == "task-1"
     assert result["finish"]["data"]["fid"] == "file-fid"
 
 
-
-def test_quark_file_uploader_rejects_large_file_for_single_part_mode(tmp_path: Path):
+def test_quark_file_uploader_executes_multipart_upload_flow(tmp_path: Path):
     file_path = tmp_path / "large.bin"
     file_path.write_bytes(b"0" * (5 * 1024 * 1024 + 1))
     upload_api = FakeUploadApi()
@@ -68,12 +79,18 @@ def test_quark_file_uploader_rejects_large_file_for_single_part_mode(tmp_path: P
     uploader = QuarkFileUploader(upload_api=upload_api, oss_transport=oss_transport)
     entry = LocalFileEntry(local_name="课程A", absolute_path=str(file_path), relative_path="large.bin", size_bytes=file_path.stat().st_size)
 
-    try:
-        uploader.upload_file(entry, target_parent_fid="root-fid")
-        raised = False
-    except NotImplementedError:
-        raised = True
+    result = uploader.upload_file(entry, target_parent_fid="root-fid")
 
-    assert raised is True
-    assert upload_api.calls == []
-    assert oss_transport.calls == []
+    assert [name for name, _ in upload_api.calls] == [
+        "preupload",
+        "update_hash",
+        "get_upload_auth",
+        "get_upload_auth",
+        "get_upload_auth_complete",
+        "finish",
+    ]
+    assert len(oss_transport.put_calls) == 2
+    assert oss_transport.put_calls[0][3:] == (0, 4 * 1024 * 1024)
+    assert oss_transport.put_calls[1][3:] == (4 * 1024 * 1024, 1024 * 1024 + 1)
+    assert len(oss_transport.post_calls) == 1
+    assert result["multipart_complete"] == {"ok": True}

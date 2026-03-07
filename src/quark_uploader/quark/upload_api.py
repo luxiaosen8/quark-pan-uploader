@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 from time import time
 
 from quark_uploader.quark.session import BASE_URL, QuarkSession
@@ -73,6 +76,43 @@ def build_put_auth_meta(
     return "\n".join(lines)
 
 
+def build_complete_multipart_xml(etags: list[str]) -> str:
+    parts = [
+        f'<Part><PartNumber>{index}</PartNumber><ETag>"{etag}"</ETag></Part>'
+        for index, etag in enumerate(etags, start=1)
+    ]
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<CompleteMultipartUpload>\n'
+        + "\n".join(parts)
+        + '\n</CompleteMultipartUpload>'
+    )
+
+
+def build_post_complete_auth_meta(
+    oss_date: str,
+    bucket: str,
+    obj_key: str,
+    upload_id: str,
+    xml_data: str,
+    callback_info: dict,
+    user_agent: str,
+) -> str:
+    xml_md5 = base64.b64encode(hashlib.md5(xml_data.encode("utf-8")).digest()).decode("utf-8")
+    callback_b64 = base64.b64encode(json.dumps(callback_info, separators=(",", ":")).encode("utf-8")).decode("utf-8")
+    lines = [
+        "POST",
+        xml_md5,
+        "application/xml",
+        oss_date,
+        f"x-oss-callback:{callback_b64}",
+        f"x-oss-date:{oss_date}",
+        f"x-oss-user-agent:{user_agent}",
+        f"/{bucket}/{obj_key}?uploadId={upload_id}",
+    ]
+    return "\n".join(lines)
+
+
 def parse_upload_auth_result(
     auth_result: dict,
     bucket: str,
@@ -96,6 +136,34 @@ def parse_upload_auth_result(
         headers["X-Oss-Hash-Ctx"] = hash_ctx
     return {
         "upload_url": f"https://{bucket}.pds.quark.cn/{obj_key}?partNumber={part_number}&uploadId={upload_id}",
+        "headers": headers,
+    }
+
+
+def parse_complete_upload_auth_result(
+    auth_result: dict,
+    bucket: str,
+    obj_key: str,
+    upload_id: str,
+    xml_data: str,
+    callback_info: dict,
+    oss_date: str,
+    user_agent: str,
+) -> dict:
+    auth_key = auth_result.get("data", {}).get("auth_key", "")
+    callback_b64 = base64.b64encode(json.dumps(callback_info, separators=(",", ":")).encode("utf-8")).decode("utf-8")
+    xml_md5 = base64.b64encode(hashlib.md5(xml_data.encode("utf-8")).digest()).decode("utf-8")
+    headers = {
+        "Content-Type": "application/xml",
+        "x-oss-date": oss_date,
+        "x-oss-user-agent": user_agent,
+        "x-oss-callback": callback_b64,
+        "Content-MD5": xml_md5,
+    }
+    if auth_key:
+        headers["authorization"] = auth_key
+    return {
+        "upload_url": f"https://{bucket}.pds.quark.cn/{obj_key}?uploadId={upload_id}",
         "headers": headers,
     }
 
