@@ -42,11 +42,11 @@ class FakeOssTransport:
         self.post_calls = []
 
     def upload_single_part(self, file_path, upload_url: str, headers: dict):
-        self.put_calls.append((str(file_path), upload_url, headers.get("authorization")))
+        self.put_calls.append((str(file_path), upload_url, headers.get("authorization"), headers.get("X-Oss-Hash-Ctx")))
         return {"etag": "etag-1"}
 
     def upload_part(self, file_path, upload_url: str, headers: dict, offset: int, size: int):
-        self.put_calls.append((str(file_path), upload_url, headers.get("authorization"), offset, size))
+        self.put_calls.append((str(file_path), upload_url, headers.get("authorization"), headers.get("X-Oss-Hash-Ctx"), offset, size))
         return {"etag": f"etag-{len(self.put_calls)}"}
 
     def complete_multipart_upload(self, upload_url: str, headers: dict, xml_data: str):
@@ -64,9 +64,11 @@ def test_quark_file_uploader_executes_single_part_upload_flow(tmp_path: Path):
 
     result = uploader.upload_file(entry, target_parent_fid="root-fid")
 
-    assert [name for name, _ in upload_api.calls] == ["preupload", "update_hash", "get_upload_auth", "finish"]
+    assert [name for name, _ in upload_api.calls] == ["preupload", "update_hash", "get_upload_auth", "get_upload_auth_complete", "finish"]
     assert oss_transport.put_calls[0][1] == "https://ul-zb.pds.quark.cn/obj-key?partNumber=1&uploadId=upload-1"
     assert oss_transport.put_calls[0][2] == "AUTH"
+    assert len(oss_transport.post_calls) == 1
+    assert result["multipart_complete"] == {"ok": True}
     assert result["task_id"] == "task-1"
     assert result["finish"]["data"]["fid"] == "file-fid"
 
@@ -90,7 +92,9 @@ def test_quark_file_uploader_executes_multipart_upload_flow(tmp_path: Path):
         "finish",
     ]
     assert len(oss_transport.put_calls) == 2
-    assert oss_transport.put_calls[0][3:] == (0, 4 * 1024 * 1024)
-    assert oss_transport.put_calls[1][3:] == (4 * 1024 * 1024, 1024 * 1024 + 1)
+    assert oss_transport.put_calls[0][4:] == (0, 4 * 1024 * 1024)
+    assert oss_transport.put_calls[1][4:] == (4 * 1024 * 1024, 1024 * 1024 + 1)
+    assert oss_transport.put_calls[1][3] is not None
+    assert "x-oss-hash-ctx:" in upload_api.calls[3][1]["auth_meta"]
     assert len(oss_transport.post_calls) == 1
     assert result["multipart_complete"] == {"ok": True}
