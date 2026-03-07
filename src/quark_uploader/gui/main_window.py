@@ -87,6 +87,16 @@ class MainWindow(QWidget):
             self.task_table.setItem(row_index, 3, QTableWidgetItem(task.status.value))
             self.task_table.setItem(row_index, 4, QTableWidgetItem(task.share_url or ""))
 
+
+    def update_task_status(self, local_name: str, status: str, share_url: str = "") -> None:
+        for row_index in range(self.task_table.rowCount()):
+            name_item = self.task_table.item(row_index, 0)
+            if name_item and name_item.text() == local_name:
+                self.task_table.setItem(row_index, 3, QTableWidgetItem(status))
+                if share_url:
+                    self.task_table.setItem(row_index, 4, QTableWidgetItem(share_url))
+                break
+
     def populate_remote_tree(self, nodes: list[RemoteFolderNode]) -> None:
         self.remote_tree.clear()
         for node in nodes:

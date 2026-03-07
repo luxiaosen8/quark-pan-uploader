@@ -103,6 +103,8 @@ class MainWindowController:
             self.window.append_log("[WARN] 请先选择网盘目标目录")
             return
         self.current_upload_plan = build_upload_plan(self.window.remote_folder_id, self.current_folder_tasks)
+        for job in self.current_upload_plan.jobs:
+            self.window.update_task_status(job.local_name, "uploading")
         self.window.append_log(
             f"[INFO] 已创建上传计划，共 {len(self.current_upload_plan.jobs)} 个子文件夹任务"
         )
