@@ -49,7 +49,7 @@ class UploadExecutionEngine:
         if self.result_writer is not None:
             self.result_writer.append_event(level, phase, message, **extra)
 
-    def execute_job(self, job: UploadJob, cancel_token: UploadCancellationToken | None = None) -> UploadExecutionResult:
+    def execute_job(self, job: UploadJob, cancel_token: UploadCancellationToken | None = None, progress_callback=None) -> UploadExecutionResult:
         started_at = datetime.now().isoformat()
         retry_count = 0
         uploaded_files = 0
@@ -69,7 +69,7 @@ class UploadExecutionEngine:
                         cancel_token.raise_if_cancelled()
                     try:
                         try:
-                            self.uploader.upload_file(entry, parent_fid, cancel_token=cancel_token)
+                            self.uploader.upload_file(entry, parent_fid, cancel_token=cancel_token, progress_callback=progress_callback)
                         except TypeError:
                             self.uploader.upload_file(entry, parent_fid)
                         uploaded_files += 1

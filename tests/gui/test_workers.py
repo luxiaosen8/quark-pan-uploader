@@ -58,3 +58,23 @@ def test_upload_worker_handle_runs_in_background_thread(qtbot):
     assert handle.is_running() is True
     qtbot.waitUntil(lambda: finished_states == ["completed"], timeout=3000)
     assert handle.is_running() is False
+
+
+
+def test_upload_worker_emits_current_action_from_progress_events():
+    from quark_uploader.gui.workers import UploadWorker
+
+    class ProgressExecutor:
+        def execute_job(self, job, cancel_token=None, progress_callback=None):
+            progress_callback({"phase": "part_upload", "file_name": "large.bin", "part_number": 2, "part_total": 5})
+            return type("Result", (), {"status": "completed", "uploaded_files": 1, "share_url": "", "retry_count": 0})()
+
+    token = UploadCancellationToken()
+    jobs = [type("Job", (), {"local_name": "A"})()]
+    worker = UploadWorker(plan=type("Plan", (), {"jobs": jobs})(), executor_factory=lambda logger=None: ProgressExecutor(), cancel_token=token)
+    actions = []
+    worker.current_action.connect(actions.append)
+
+    worker.run()
+
+    assert any("large.bin" in action and "2/5" in action for action in actions)

@@ -39,6 +39,17 @@ class UploadWorker(QObject):
                 executor.share_service.logger = self.log_message.emit
         return executor
 
+
+    def _emit_progress_action(self, payload: dict) -> None:
+        file_name = payload.get("file_name", "")
+        phase = payload.get("phase", "")
+        part_number = payload.get("part_number", 0)
+        part_total = payload.get("part_total", 0)
+        if part_total:
+            self.current_action.emit(f"当前文件：{file_name} | 阶段：{phase} | 分片 {part_number}/{part_total}")
+        else:
+            self.current_action.emit(f"当前文件：{file_name} | 阶段：{phase}")
+
     @Slot()
     def run(self) -> None:
         executor = self._build_executor()
@@ -55,7 +66,10 @@ class UploadWorker(QObject):
                     break
                 self.current_action.emit(f'当前任务：{job.local_name}')
                 self.task_status.emit(job.local_name, 'uploading', '', 0)
-                result = executor.execute_job(job, cancel_token=self.cancel_token)
+                try:
+                    result = executor.execute_job(job, cancel_token=self.cancel_token, progress_callback=self._emit_progress_action)
+                except TypeError:
+                    result = executor.execute_job(job, cancel_token=self.cancel_token)
                 self.task_status.emit(job.local_name, getattr(result, 'status', 'completed'), getattr(result, 'share_url', ''), getattr(result, 'retry_count', 0))
                 state = getattr(result, 'status', 'completed')
                 if state == 'failed':

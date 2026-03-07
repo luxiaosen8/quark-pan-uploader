@@ -116,3 +116,21 @@ def test_quark_file_uploader_emits_debug_logs_for_single_part_flow(tmp_path: Pat
     assert any("预上传成功" in line for line in logs)
     assert any("单分片上传完成" in line for line in logs)
     assert any("finish 完成" in line for line in logs)
+
+
+
+def test_quark_file_uploader_emits_progress_events_for_multipart_flow(tmp_path: Path):
+    file_path = tmp_path / "large.bin"
+    file_path.write_bytes(b"0" * (5 * 1024 * 1024 + 1))
+    upload_api = FakeUploadApi()
+    oss_transport = FakeOssTransport()
+    events = []
+    uploader = QuarkFileUploader(upload_api=upload_api, oss_transport=oss_transport)
+    entry = LocalFileEntry(local_name="课程A", absolute_path=str(file_path), relative_path="large.bin", size_bytes=file_path.stat().st_size)
+
+    uploader.upload_file(entry, target_parent_fid="root-fid", progress_callback=events.append)
+
+    assert any(evt.get("phase") == "preupload" for evt in events)
+    assert any(evt.get("phase") == "part_upload" and evt.get("part_number") == 1 for evt in events)
+    assert any(evt.get("phase") == "part_upload" and evt.get("part_number") == 2 for evt in events)
+    assert any(evt.get("phase") == "finish" for evt in events)

@@ -40,11 +40,16 @@ class QuarkFileUploader:
         if self.logger is not None:
             self.logger(message)
 
+    def _emit_progress(self, callback, **payload) -> None:
+        if callback is not None:
+            callback(payload)
+
     def upload_file(self, file_entry: LocalFileEntry, target_parent_fid: str, cancel_token: UploadCancellationToken | None = None, progress_callback=None):
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
         path = Path(file_entry.absolute_path)
         self._log(f"[DEBUG] 文件上传开始：name={path.name} size={file_entry.size_bytes} target_parent_fid={target_parent_fid}")
+        self._emit_progress(progress_callback, phase="file_start", file_name=path.name, part_number=0, part_total=0)
         mime_type, _ = mimetypes.guess_type(str(path))
         mime_type = mime_type or "application/octet-stream"
         md5_hash, sha1_hash = self._calculate_hashes(path)
@@ -56,6 +61,7 @@ class QuarkFileUploader:
             mime_type=mime_type,
         )
         self._log(f"[DEBUG] 预上传请求：file={path.name} size={file_entry.size_bytes}")
+        self._emit_progress(progress_callback, phase="preupload", file_name=path.name, part_number=0, part_total=0)
         pre_result = self.upload_api.preupload(pre_payload)
         data = pre_result.get("data", {})
         task_id = data.get("task_id", "")
@@ -83,6 +89,7 @@ class QuarkFileUploader:
                     mime_type=mime_type,
                     callback_info=callback_info,
                     cancel_token=cancel_token,
+                    progress_callback=progress_callback,
                 )
             else:
                 auth_result, multipart_complete = self._upload_multiple_parts(
@@ -95,11 +102,13 @@ class QuarkFileUploader:
                     mime_type=mime_type,
                     callback_info=callback_info,
                     cancel_token=cancel_token,
+                    progress_callback=progress_callback,
                 )
 
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
         self._log(f"[DEBUG] 调用 finish：task_id={task_id} obj_key={obj_key}")
+        self._emit_progress(progress_callback, phase="finish", file_name=path.name, part_number=0, part_total=0)
         finish_result = self.upload_api.finish(build_upload_finish_payload(task_id, obj_key or None))
         self._log(f"[DEBUG] finish 完成：task_id={task_id}")
         return {
@@ -111,7 +120,7 @@ class QuarkFileUploader:
             "finish": finish_result,
         }
 
-    def _upload_single_part(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict, cancel_token: UploadCancellationToken | None = None):
+    def _upload_single_part(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict, cancel_token: UploadCancellationToken | None = None, progress_callback=None):
         oss_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
         auth_meta = build_put_auth_meta(
             mime_type=mime_type,
@@ -123,6 +132,7 @@ class QuarkFileUploader:
             user_agent=DEFAULT_OSS_USER_AGENT,
         )
         self._log(f"[DEBUG] 获取单分片上传授权：part=1 upload_id={upload_id}")
+        self._emit_progress(progress_callback, phase="part_upload", file_name=path.name, part_number=1, part_total=1)
         auth_result = self.upload_api.get_upload_auth(
             build_upload_auth_payload(task_id=task_id, auth_info=auth_info, auth_meta=auth_meta)
         )
@@ -166,6 +176,7 @@ class QuarkFileUploader:
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
         self._log("[DEBUG] 单分片开始执行 OSS 合并完成")
+        self._emit_progress(progress_callback, phase="complete", file_name=path.name, part_number=1, part_total=1)
         try:
             multipart_complete = self.oss_transport.complete_multipart_upload(
                 parsed_complete["upload_url"], parsed_complete["headers"], xml_data, cancel_token=cancel_token
@@ -176,7 +187,7 @@ class QuarkFileUploader:
             )
         return complete_auth_result, oss_upload, multipart_complete
 
-    def _upload_multiple_parts(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict, cancel_token: UploadCancellationToken | None = None):
+    def _upload_multiple_parts(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict, cancel_token: UploadCancellationToken | None = None, progress_callback=None):
         if not callback_info:
             raise NotImplementedError("多分片上传需要 callback 信息")
         part_etags: list[str] = []
@@ -190,6 +201,7 @@ class QuarkFileUploader:
             oss_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
             hash_ctx = self._calculate_incremental_hash_context(path, part_number) if part_number > 1 else ""
             self._log(f"[DEBUG] 获取分片上传授权：part={part_number} offset={offset} size={part_size} hash_ctx={'yes' if hash_ctx else 'no'}")
+            self._emit_progress(progress_callback, phase="part_upload", file_name=path.name, part_number=part_number, part_total=((file_size + MULTIPART_CHUNK_SIZE - 1) // MULTIPART_CHUNK_SIZE))
             auth_meta = build_put_auth_meta(
                 mime_type=mime_type,
                 oss_date=oss_date,
