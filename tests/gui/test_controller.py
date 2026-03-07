@@ -85,3 +85,73 @@ def test_controller_loads_children_when_tree_item_expands(qtbot):
     assert service.child_calls == ["folder-1"]
     assert item.childCount() == 1
     assert item.child(0).text(0) == "子目录"
+
+
+
+class TrackingLoginDialog(FakeLoginDialog):
+    def __init__(self, cookie_string=None):
+        super().__init__(cookie_string)
+        self.exec_called = False
+        self._parent = None
+
+    def setParent(self, parent):
+        self._parent = parent
+
+    def parent(self):
+        return self._parent
+
+    def exec(self):
+        self.exec_called = True
+        return super().exec()
+
+
+def test_official_login_button_click_invokes_dialog_factory(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    dialog = TrackingLoginDialog(None)
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success: dialog,
+    )
+
+    qtbot.mouseClick(window.official_login_button, __import__('PySide6.QtCore').QtCore.Qt.MouseButton.LeftButton)
+
+    assert dialog.exec_called is True
+
+
+
+def test_open_official_login_logs_error_when_dialog_factory_raises(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    controller.open_official_login()
+
+    assert window.status_label.text() == "官方登录打开失败"
+    assert "官方登录窗口打开失败：boom" in window.log_output.toPlainText()
+
+
+def test_open_official_login_assigns_window_as_dialog_parent(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    dialog = TrackingLoginDialog(None)
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success: dialog,
+    )
+
+    controller.open_official_login()
+
+    assert dialog.parent() is window

@@ -63,8 +63,24 @@ class MainWindowController:
         self.window.recompute_start_enabled()
 
     def open_official_login(self) -> None:
-        dialog = self.login_dialog_factory(self.validate_cookie_string)
-        accepted = bool(dialog.exec())
+        self.window.append_log("[INFO] 正在打开官方登录窗口...")
+        try:
+            dialog = self.login_dialog_factory(self.validate_cookie_string)
+            if hasattr(dialog, "setParent"):
+                dialog.setParent(self.window)
+            if hasattr(dialog, "setWindowTitle"):
+                dialog.setWindowTitle(getattr(dialog, "windowTitle", lambda: "官方登录")())
+            if hasattr(dialog, "setModal"):
+                dialog.setModal(True)
+            if hasattr(dialog, "raise_"):
+                dialog.raise_()
+            if hasattr(dialog, "activateWindow"):
+                dialog.activateWindow()
+            accepted = bool(dialog.exec())
+        except Exception as exc:
+            self.window.status_label.setText("官方登录打开失败")
+            self.window.append_log(f"[ERROR] 官方登录窗口打开失败：{exc}")
+            return
         cookie_string = getattr(dialog, "cookie_string", "")
         if accepted and cookie_string:
             self.window.cookie_input.setText(cookie_string)
