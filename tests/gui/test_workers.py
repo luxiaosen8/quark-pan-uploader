@@ -34,3 +34,27 @@ def test_upload_worker_marks_remaining_jobs_stopped_when_cancel_requested_mid_ru
     assert ("A", "completed", 0) in task_updates
     assert ("B", "stopped", 0) in task_updates
     assert finished_states == ["stopped"]
+
+
+
+def test_upload_worker_handle_runs_in_background_thread(qtbot):
+    import time
+    from quark_uploader.gui.workers import UploadWorkerHandle
+
+    class SlowExecutor:
+        def execute_job(self, job, cancel_token=None):
+            time.sleep(0.2)
+            return type("Result", (), {"status": "completed", "uploaded_files": 1, "share_url": "", "retry_count": 0})()
+
+    token = UploadCancellationToken()
+    jobs = [type("Job", (), {"local_name": "A"})()]
+    worker = UploadWorker(plan=type("Plan", (), {"jobs": jobs})(), executor_factory=lambda logger=None: SlowExecutor(), cancel_token=token)
+    finished_states = []
+    worker.run_finished.connect(lambda status: finished_states.append(status))
+    handle = UploadWorkerHandle(worker)
+
+    handle.start()
+
+    assert handle.is_running() is True
+    qtbot.waitUntil(lambda: finished_states == ["completed"], timeout=3000)
+    assert handle.is_running() is False
