@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from quark_uploader.services.cancellation import UploadCancellationToken
 from quark_uploader.services.share_policy import build_share_payload
 
 
@@ -22,13 +23,17 @@ class QuarkShareService:
         if self.logger is not None:
             self.logger(message)
 
-    def create_share_for_folder(self, fid: str, title: str) -> ShareCreationResult:
+    def create_share_for_folder(self, fid: str, title: str, cancel_token: UploadCancellationToken | None = None) -> ShareCreationResult:
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
         self._log(f"[DEBUG] 开始创建分享：title={title} fid={fid}")
         create_result = self.share_api.create_share(build_share_payload(fid=fid, title=title))
         task_id = create_result.get("data", {}).get("task_id", "")
         self._log(f"[DEBUG] 分享任务已创建：task_id={task_id}")
         share_id = ""
         for retry_index in range(self.max_retries):
+            if cancel_token is not None:
+                cancel_token.raise_if_cancelled()
             task_payload = self.task_api.get_task(task_id, retry_index=retry_index)
             task_data = task_payload.get("data", {})
             self._log(f"[DEBUG] 分享任务轮询：retry={retry_index} status={task_data.get('status')}")
@@ -40,6 +45,8 @@ class QuarkShareService:
                 raise RuntimeError(task_data.get("message", "分享创建失败"))
         if not share_id:
             raise RuntimeError("分享创建超时")
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
         detail_result = self.share_api.get_share_detail(share_id)
         detail_data = detail_result.get("data", {})
         share_url = detail_data.get("share_url") or detail_data.get("url") or ""

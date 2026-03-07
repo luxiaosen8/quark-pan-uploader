@@ -227,3 +227,48 @@ def test_controller_can_cleanup_remote_test_directories(qtbot):
     controller.cleanup_remote_test_directories()
 
     assert "已清理测试目录：2 个" in window.log_output.toPlainText()
+
+
+
+class FakeAsyncHandle:
+    def __init__(self):
+        self.stop_requested = False
+        self.started = False
+
+    def start(self):
+        self.started = True
+
+    def request_stop(self):
+        self.stop_requested = True
+
+    def is_running(self):
+        return self.started and not self.stop_requested
+
+
+def test_controller_stop_upload_requests_worker_cancellation(qtbot, tmp_path: Path):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    lesson = tmp_path / "课程A"
+    lesson.mkdir()
+    (lesson / "cover.txt").write_text("12", encoding="utf-8")
+    handle = FakeAsyncHandle()
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success, parent=None: FakeLoginDialog(),
+        upload_executor_factory=lambda: FakeExecutor(),
+        use_async_upload=True,
+        upload_worker_factory=lambda plan, executor_factory: handle,
+    )
+    window.cookie_valid = True
+    window.remote_folder_id = "folder-1"
+    controller.apply_local_root(str(tmp_path))
+
+    controller.start_upload()
+    controller.stop_upload()
+
+    assert handle.started is True
+    assert handle.stop_requested is True
+    assert "[WARN] 用户请求停止上传" in window.log_output.toPlainText()

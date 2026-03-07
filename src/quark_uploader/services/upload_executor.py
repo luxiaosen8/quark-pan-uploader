@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 
 from pydantic import BaseModel
 
+from quark_uploader.services.cancellation import UploadCancellationToken, UploadCancelled
 from quark_uploader.services.remote_directory_sync import ResolvedRemoteDirectory
 from quark_uploader.services.upload_workflow import UploadJob
 
@@ -48,21 +49,33 @@ class UploadExecutionEngine:
         if self.result_writer is not None:
             self.result_writer.append_event(level, phase, message, **extra)
 
-    def execute_job(self, job: UploadJob) -> UploadExecutionResult:
+    def execute_job(self, job: UploadJob, cancel_token: UploadCancellationToken | None = None) -> UploadExecutionResult:
         started_at = datetime.now().isoformat()
         retry_count = 0
-        self._append_event("INFO", "job", "job start", folder_name=job.local_name, total_files=len(job.file_entries))
-        resolved = self.directory_sync_service.ensure_job_directories(job)
         uploaded_files = 0
+        root_folder_fid = ""
+        self._append_event("INFO", "job", "job start", folder_name=job.local_name, total_files=len(job.file_entries))
         try:
+            if cancel_token is not None:
+                cancel_token.raise_if_cancelled()
+            resolved = self.directory_sync_service.ensure_job_directories(job)
+            root_folder_fid = resolved.root_folder_fid
+
             for entry in job.file_entries:
                 parent_fid = self._resolve_target_parent_fid(entry.relative_path, resolved)
                 attempts = 0
                 while True:
+                    if cancel_token is not None:
+                        cancel_token.raise_if_cancelled()
                     try:
-                        self.uploader.upload_file(entry, parent_fid)
+                        try:
+                            self.uploader.upload_file(entry, parent_fid, cancel_token=cancel_token)
+                        except TypeError:
+                            self.uploader.upload_file(entry, parent_fid)
                         uploaded_files += 1
                         break
+                    except UploadCancelled:
+                        raise
                     except Exception as exc:
                         if attempts >= self.file_retry_limit:
                             raise
@@ -70,16 +83,28 @@ class UploadExecutionEngine:
                         retry_count += 1
                         self._log(f"[WARN] 重试上传文件：file={entry.relative_path} attempt={attempts} error={exc}")
                         self._append_event("WARN", "upload", "retry file upload", file_name=entry.relative_path, attempt=attempts, error=str(exc))
+
             share_id = ""
             share_url = ""
             if self.share_service is not None:
                 share_attempt = 0
                 while True:
+                    if cancel_token is not None:
+                        cancel_token.raise_if_cancelled()
                     try:
-                        share_result = self.share_service.create_share_for_folder(fid=resolved.root_folder_fid, title=job.local_name)
+                        try:
+                            share_result = self.share_service.create_share_for_folder(
+                                fid=resolved.root_folder_fid,
+                                title=job.local_name,
+                                cancel_token=cancel_token,
+                            )
+                        except TypeError:
+                            share_result = self.share_service.create_share_for_folder(fid=resolved.root_folder_fid, title=job.local_name)
                         share_id = share_result.share_id
                         share_url = share_result.share_url
                         break
+                    except UploadCancelled:
+                        raise
                     except Exception as exc:
                         if share_attempt >= self.share_retry_limit:
                             raise
@@ -87,8 +112,9 @@ class UploadExecutionEngine:
                         retry_count += 1
                         self._log(f"[WARN] 重试创建分享：folder={job.local_name} attempt={share_attempt} error={exc}")
                         self._append_event("WARN", "share", "retry share creation", folder_name=job.local_name, attempt=share_attempt, error=str(exc))
+
             result = UploadExecutionResult(
-                root_folder_fid=resolved.root_folder_fid,
+                root_folder_fid=root_folder_fid,
                 uploaded_files=uploaded_files,
                 share_id=share_id,
                 share_url=share_url,
@@ -100,9 +126,22 @@ class UploadExecutionEngine:
             self._append_event("INFO", "job", "job completed", folder_name=job.local_name, uploaded_files=result.uploaded_files, share_url=result.share_url)
             self._write_result(job, result)
             return result
+        except UploadCancelled as exc:
+            result = UploadExecutionResult(
+                root_folder_fid=root_folder_fid,
+                uploaded_files=uploaded_files,
+                retry_count=retry_count,
+                status="stopped",
+                error_message=str(exc),
+                started_at=started_at,
+                finished_at=datetime.now().isoformat(),
+            )
+            self._append_event("WARN", "job", "job stopped", folder_name=job.local_name, error=result.error_message)
+            self._write_result(job, result)
+            return result
         except Exception as exc:
             result = UploadExecutionResult(
-                root_folder_fid=resolved.root_folder_fid,
+                root_folder_fid=root_folder_fid,
                 uploaded_files=uploaded_files,
                 retry_count=retry_count + 1,
                 status="failed",

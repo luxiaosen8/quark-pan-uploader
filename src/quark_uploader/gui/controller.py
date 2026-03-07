@@ -8,6 +8,8 @@ from quark_uploader.settings import AppSettings
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 
 from quark_uploader.gui.main_window import MainWindow
+from quark_uploader.gui.workers import UploadWorker, UploadWorkerHandle
+from quark_uploader.services.cancellation import UploadCancellationToken
 from quark_uploader.services.remote_cleanup_service import RemoteCleanupService
 from quark_uploader.services.scanner import scan_first_level_subfolders
 from quark_uploader.services.upload_workflow import build_upload_plan
@@ -22,6 +24,8 @@ class MainWindowController:
         upload_executor_factory: Callable[[], object] | None = None,
         settings_store=None,
         cleanup_service_factory: Callable[[], object] | None = None,
+        use_async_upload: bool = False,
+        upload_worker_factory: Callable[[object, object], object] | None = None,
     ) -> None:
         self.window = window
         self.refresh_service_factory = refresh_service_factory
@@ -29,6 +33,10 @@ class MainWindowController:
         self.upload_executor_factory = upload_executor_factory
         self.settings_store = settings_store
         self.cleanup_service_factory = cleanup_service_factory
+        self.use_async_upload = use_async_upload
+        self.upload_worker_factory = upload_worker_factory
+        self.current_cancel_token = None
+        self.current_upload_handle = None
         self.current_refresh_service = None
         self.current_folder_tasks = []
         self.current_upload_plan = None
@@ -39,6 +47,8 @@ class MainWindowController:
         self.window.open_output_button.clicked.connect(self.open_output_directory)
         self.window.cleanup_test_dirs_button.clicked.connect(self.cleanup_remote_test_directories)
         self.window.start_button.clicked.connect(self.start_upload)
+        self.window.stop_button.clicked.connect(self.stop_upload)
+        self.window.stop_button.setEnabled(False)
         self.window.remote_tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
         self._load_settings()
         self.window.remote_tree.itemExpanded.connect(self.on_tree_item_expanded)
@@ -158,6 +168,41 @@ class MainWindowController:
                     child_item.addChild(QTreeWidgetItem(["加载中...", ""]))
                 item.addChild(child_item)
 
+
+    def _build_worker_handle(self, plan):
+        cancel_token = UploadCancellationToken()
+        if self.upload_worker_factory is not None:
+            handle = self.upload_worker_factory(plan, self.upload_executor_factory)
+            self.current_cancel_token = cancel_token
+            return handle
+        worker = UploadWorker(plan=plan, executor_factory=self.upload_executor_factory, cancel_token=cancel_token)
+        handle = UploadWorkerHandle(worker)
+        worker.task_status.connect(self.window.update_task_status)
+        worker.progress_summary.connect(self.window.set_progress_summary)
+        worker.current_action.connect(self.window.set_current_action)
+        worker.log_message.connect(self.window.append_log)
+        worker.run_finished.connect(self._on_upload_run_finished)
+        self.current_cancel_token = cancel_token
+        return handle
+
+    def _on_upload_run_finished(self, final_state: str) -> None:
+        self.window.stop_button.setEnabled(False)
+        self.window.start_button.setEnabled(True)
+        if final_state == "stopped":
+            self.window.append_log("[WARN] 上传已停止")
+
+    def stop_upload(self) -> None:
+        if self.current_upload_handle is None:
+            self.window.append_log("[WARN] 当前没有正在执行的上传任务")
+            return
+        self.window.append_log("[WARN] 用户请求停止上传")
+        self.window.set_current_action("当前动作：正在停止...")
+        if hasattr(self.current_upload_handle, "request_stop"):
+            self.current_upload_handle.request_stop()
+        elif self.current_cancel_token is not None:
+            self.current_cancel_token.request_stop()
+        self.window.stop_button.setEnabled(False)
+
     def start_upload(self) -> None:
         if not self.current_folder_tasks:
             self.window.append_log("[WARN] 当前没有可上传的子文件夹")
@@ -167,15 +212,22 @@ class MainWindowController:
             return
         self.current_upload_plan = build_upload_plan(self.window.remote_folder_id, self.current_folder_tasks)
         total = len(self.current_upload_plan.jobs)
-        failed = 0
-        completed = 0
         for job in self.current_upload_plan.jobs:
             self.window.update_task_status(job.local_name, "uploading")
+        self.window.set_progress_summary(completed=0, total=total, failed=0)
         self.window.append_log(
             f"[INFO] 已创建上传计划，共 {len(self.current_upload_plan.jobs)} 个子文件夹任务"
         )
+        self.window.start_button.setEnabled(False)
+        self.window.stop_button.setEnabled(True)
+        if self.upload_executor_factory is not None and self.use_async_upload:
+            self.current_upload_handle = self._build_worker_handle(self.current_upload_plan)
+            self.current_upload_handle.start()
+            return
         if self.upload_executor_factory is not None:
             executor = self.upload_executor_factory()
+            failed = 0
+            completed = 0
             for job in self.current_upload_plan.jobs:
                 self.window.set_current_action(f"当前任务：{job.local_name}")
                 try:
@@ -195,3 +247,5 @@ class MainWindowController:
                     self.window.append_log(f"[INFO] 分享链接：{result.share_url}")
                 self.window.set_progress_summary(completed=completed, total=total, failed=failed)
             self.window.set_current_action("当前动作：空闲")
+            self.window.stop_button.setEnabled(False)
+            self.window.start_button.setEnabled(True)

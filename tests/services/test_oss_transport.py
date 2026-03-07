@@ -59,3 +59,23 @@ def test_requests_oss_transport_completes_multipart_upload():
     assert client.post_calls[0][1]["authorization"] == "AUTH"
     assert client.post_calls[0][3] == "<xml />"
     assert result == {"ok": True}
+
+
+
+def test_requests_oss_transport_raises_cancelled_before_upload(tmp_path):
+    from quark_uploader.services.cancellation import UploadCancellationToken, UploadCancelled
+    file_path = tmp_path / "cover.txt"
+    file_path.write_text("12", encoding="utf-8")
+    client = DummyRequests()
+    transport = RequestsOssTransport(http_client=client)
+    token = UploadCancellationToken()
+    token.request_stop()
+
+    raised = False
+    try:
+        transport.upload_part(file_path, "https://example.com/upload", {"authorization": "AUTH"}, offset=0, size=2, cancel_token=token)
+    except UploadCancelled:
+        raised = True
+
+    assert raised is True
+    assert client.put_calls == []

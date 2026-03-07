@@ -19,6 +19,7 @@ from quark_uploader.quark.upload_api import (
     parse_complete_upload_auth_result,
     parse_upload_auth_result,
 )
+from quark_uploader.services.cancellation import UploadCancellationToken
 from quark_uploader.services.file_manifest import LocalFileEntry
 from quark_uploader.services.oss_transport import RequestsOssTransport
 
@@ -39,7 +40,9 @@ class QuarkFileUploader:
         if self.logger is not None:
             self.logger(message)
 
-    def upload_file(self, file_entry: LocalFileEntry, target_parent_fid: str):
+    def upload_file(self, file_entry: LocalFileEntry, target_parent_fid: str, cancel_token: UploadCancellationToken | None = None, progress_callback=None):
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
         path = Path(file_entry.absolute_path)
         self._log(f"[DEBUG] 文件上传开始：name={path.name} size={file_entry.size_bytes} target_parent_fid={target_parent_fid}")
         mime_type, _ = mimetypes.guess_type(str(path))
@@ -79,6 +82,7 @@ class QuarkFileUploader:
                     bucket=bucket,
                     mime_type=mime_type,
                     callback_info=callback_info,
+                    cancel_token=cancel_token,
                 )
             else:
                 auth_result, multipart_complete = self._upload_multiple_parts(
@@ -90,8 +94,11 @@ class QuarkFileUploader:
                     bucket=bucket,
                     mime_type=mime_type,
                     callback_info=callback_info,
+                    cancel_token=cancel_token,
                 )
 
+        if cancel_token is not None:
+            cancel_token.raise_if_cancelled()
         self._log(f"[DEBUG] 调用 finish：task_id={task_id} obj_key={obj_key}")
         finish_result = self.upload_api.finish(build_upload_finish_payload(task_id, obj_key or None))
         self._log(f"[DEBUG] finish 完成：task_id={task_id}")
@@ -104,7 +111,7 @@ class QuarkFileUploader:
             "finish": finish_result,
         }
 
-    def _upload_single_part(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict):
+    def _upload_single_part(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict, cancel_token: UploadCancellationToken | None = None):
         oss_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
         auth_meta = build_put_auth_meta(
             mime_type=mime_type,
@@ -128,7 +135,10 @@ class QuarkFileUploader:
             oss_date=oss_date,
             user_agent=DEFAULT_OSS_USER_AGENT,
         )
-        oss_upload = self.oss_transport.upload_single_part(path, parsed_auth["upload_url"], parsed_auth["headers"])
+        try:
+            oss_upload = self.oss_transport.upload_single_part(path, parsed_auth["upload_url"], parsed_auth["headers"], cancel_token=cancel_token)
+        except TypeError:
+            oss_upload = self.oss_transport.upload_single_part(path, parsed_auth["upload_url"], parsed_auth["headers"])
         self._log(f"[DEBUG] 单分片上传完成：etag={oss_upload.get('etag', '')}")
         xml_data = build_complete_multipart_xml([oss_upload["etag"]])
         complete_oss_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
@@ -156,12 +166,17 @@ class QuarkFileUploader:
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
         self._log("[DEBUG] 单分片开始执行 OSS 合并完成")
-        multipart_complete = self.oss_transport.complete_multipart_upload(
-            parsed_complete["upload_url"], parsed_complete["headers"], xml_data
-        )
+        try:
+            multipart_complete = self.oss_transport.complete_multipart_upload(
+                parsed_complete["upload_url"], parsed_complete["headers"], xml_data, cancel_token=cancel_token
+            )
+        except TypeError:
+            multipart_complete = self.oss_transport.complete_multipart_upload(
+                parsed_complete["upload_url"], parsed_complete["headers"], xml_data
+            )
         return complete_auth_result, oss_upload, multipart_complete
 
-    def _upload_multiple_parts(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict):
+    def _upload_multiple_parts(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict, cancel_token: UploadCancellationToken | None = None):
         if not callback_info:
             raise NotImplementedError("多分片上传需要 callback 信息")
         part_etags: list[str] = []
@@ -199,7 +214,10 @@ class QuarkFileUploader:
                 part_number=part_number,
                 hash_ctx=hash_ctx,
             )
-            put_result = self.oss_transport.upload_part(path, parsed_auth["upload_url"], parsed_auth["headers"], offset=offset, size=part_size)
+            try:
+                put_result = self.oss_transport.upload_part(path, parsed_auth["upload_url"], parsed_auth["headers"], offset=offset, size=part_size, cancel_token=cancel_token)
+            except TypeError:
+                put_result = self.oss_transport.upload_part(path, parsed_auth["upload_url"], parsed_auth["headers"], offset=offset, size=part_size)
             self._log(f"[DEBUG] 分片上传完成：part={part_number} etag={put_result.get('etag', '')}")
             part_etags.append(put_result["etag"])
             offset += part_size
@@ -230,9 +248,14 @@ class QuarkFileUploader:
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
         self._log("[DEBUG] 开始执行多分片 OSS 合并完成")
-        multipart_complete = self.oss_transport.complete_multipart_upload(
-            parsed_complete["upload_url"], parsed_complete["headers"], xml_data
-        )
+        try:
+            multipart_complete = self.oss_transport.complete_multipart_upload(
+                parsed_complete["upload_url"], parsed_complete["headers"], xml_data, cancel_token=cancel_token
+            )
+        except TypeError:
+            multipart_complete = self.oss_transport.complete_multipart_upload(
+                parsed_complete["upload_url"], parsed_complete["headers"], xml_data
+            )
         return complete_auth_result, multipart_complete
 
     def _calculate_incremental_hash_context(self, path: Path, part_number: int) -> str:

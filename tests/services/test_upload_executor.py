@@ -162,3 +162,33 @@ def test_upload_execution_engine_writes_normal_flow_events(tmp_path: Path):
     rows = (tmp_path / "runs" / "run-2" / "events.jsonl").read_text(encoding="utf-8").splitlines()
     assert any('job start' in row for row in rows)
     assert any('job completed' in row for row in rows)
+
+
+
+def test_upload_execution_engine_returns_stopped_when_cancel_requested_before_start():
+    from quark_uploader.services.cancellation import UploadCancellationToken
+    uploader = FakeUploader()
+    token = UploadCancellationToken()
+    token.request_stop()
+    engine = UploadExecutionEngine(directory_sync_service=FakeDirectorySyncService(), uploader=uploader)
+
+    result = engine.execute_job(build_job(), cancel_token=token)
+
+    assert result.status == "stopped"
+    assert result.uploaded_files == 0
+
+
+def test_upload_execution_engine_returns_stopped_when_uploader_raises_cancelled():
+    from quark_uploader.services.cancellation import UploadCancelled, UploadCancellationToken
+
+    class CancelUploader:
+        def upload_file(self, file_entry, target_parent_fid: str, cancel_token=None, progress_callback=None):
+            raise UploadCancelled("stopped by user")
+
+    token = UploadCancellationToken()
+    engine = UploadExecutionEngine(directory_sync_service=FakeDirectorySyncService(), uploader=CancelUploader())
+
+    result = engine.execute_job(build_job(), cancel_token=token)
+
+    assert result.status == "stopped"
+    assert result.error_message == "stopped by user"

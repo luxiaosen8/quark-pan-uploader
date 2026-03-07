@@ -61,6 +61,7 @@ def build_main_window() -> MainWindow:
         upload_executor_factory=lambda: build_upload_executor(window.cookie_input.text().strip(), logger=window.append_log),
         settings_store=build_settings_store(),
         cleanup_service_factory=lambda: RemoteCleanupService(QuarkFileApi(QuarkSession(window.cookie_input.text().strip()))),
+        use_async_upload=True,
     )
     return window
 
