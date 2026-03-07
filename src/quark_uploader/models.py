@@ -24,3 +24,23 @@ class FolderTask(BaseModel):
     share_url: str | None = None
     remote_folder_fid: str | None = None
     error_message: str | None = None
+
+
+class AccountSummary(BaseModel):
+    nickname: str = ""
+    total_bytes: int = 0
+    used_bytes: int = 0
+    available_bytes: int = 0
+
+
+class RemoteFolderNode(BaseModel):
+    fid: str
+    name: str
+    parent_fid: str
+    has_children: bool = False
+    children_loaded: bool = False
+
+
+class DriveRefreshResult(BaseModel):
+    account: AccountSummary = Field(default_factory=AccountSummary)
+    root_nodes: list[RemoteFolderNode] = Field(default_factory=list)
