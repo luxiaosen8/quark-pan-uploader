@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
+
+from quark_uploader.services.secrets import sanitize_log_extra
 
 
 class StructuredLogger:
@@ -17,7 +19,7 @@ class StructuredLogger:
             "stage": stage,
             "folder_name": folder_name,
             "message": message,
-            "extra": extra,
+            "extra": sanitize_log_extra(extra),
         }
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")

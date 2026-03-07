@@ -26,6 +26,10 @@ class FolderTask(BaseModel):
     remote_folder_fid: str | None = None
     error_message: str | None = None
 
+    @property
+    def can_execute(self) -> bool:
+        return self.file_count > 0 and self.status is not FolderTaskStatus.SKIPPED
+
 
 class AccountSummary(BaseModel):
     nickname: str = ""

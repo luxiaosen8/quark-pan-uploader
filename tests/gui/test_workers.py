@@ -78,3 +78,32 @@ def test_upload_worker_emits_current_action_from_progress_events():
     worker.run()
 
     assert any("large.bin" in action and "2/5" in action for action in actions)
+
+
+
+def test_upload_worker_marks_job_failed_and_continues_after_exception():
+    class MixedExecutor:
+        def __init__(self):
+            self.calls = 0
+
+        def execute_job(self, job, cancel_token=None, progress_callback=None, status_callback=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("boom")
+            if status_callback is not None:
+                status_callback("sharing", retry_count=1)
+            return type("Result", (), {"status": "completed", "uploaded_files": 1, "share_url": "", "retry_count": 1})()
+
+    token = UploadCancellationToken()
+    jobs = [type("Job", (), {"local_name": "A"})(), type("Job", (), {"local_name": "B"})()]
+    worker = UploadWorker(plan=type("Plan", (), {"jobs": jobs})(), executor_factory=lambda logger_callback=None: MixedExecutor(), cancel_token=token)
+    task_updates = []
+    finished_states = []
+    worker.task_status.connect(lambda name, status, share_url, retry_count: task_updates.append((name, status, retry_count)))
+    worker.run_finished.connect(lambda status: finished_states.append(status))
+
+    worker.run()
+
+    assert ("A", "failed", 0) in task_updates
+    assert ("B", "sharing", 1) in task_updates
+    assert finished_states == ["completed_with_errors"]

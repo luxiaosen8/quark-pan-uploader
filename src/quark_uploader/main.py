@@ -20,27 +20,40 @@ from quark_uploader.services.result_writer import ResultWriter
 from quark_uploader.services.share_service import QuarkShareService
 from quark_uploader.services.settings_store import AppSettingsStore
 from quark_uploader.services.upload_executor import UploadExecutionEngine
+from quark_uploader.settings import AppSettings
 
 
-def build_refresh_service(cookie: str) -> DriveRefreshService:
-    session = QuarkSession(cookie=cookie)
+def build_refresh_service(cookie: str, settings: AppSettings | None = None) -> DriveRefreshService:
+    runtime_settings = settings or AppSettings()
+    session = QuarkSession(cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds)
     return DriveRefreshService(user_api=QuarkUserApi(session), file_api=QuarkFileApi(session))
 
 
-def build_upload_executor(cookie: str, logger=None) -> UploadExecutionEngine:
-    session = QuarkSession(cookie=cookie)
+def build_upload_executor(cookie: str, settings: AppSettings | None = None, logger=None) -> UploadExecutionEngine:
+    runtime_settings = settings or AppSettings()
+    session = QuarkSession(cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds)
     file_api = QuarkFileApi(session)
     upload_api = QuarkUploadApi(session)
     share_api = QuarkShareApi(session)
     task_api = QuarkTaskApi(session)
-    result_writer = ResultWriter(Path("output"))
-    share_service = QuarkShareService(share_api=share_api, task_api=task_api, result_writer=result_writer, logger=logger)
+    result_writer = ResultWriter(Path(runtime_settings.output_dir))
+    share_service = QuarkShareService(
+        share_api=share_api,
+        task_api=task_api,
+        result_writer=result_writer,
+        max_retries=runtime_settings.share_poll_max_retries,
+        poll_interval_seconds=runtime_settings.share_poll_interval_seconds,
+        logger=logger,
+    )
     return UploadExecutionEngine(
         directory_sync_service=RemoteDirectorySyncService(file_api),
         uploader=QuarkFileUploader(upload_api=upload_api, logger=logger),
         share_service=share_service,
         result_writer=result_writer,
         logger=logger,
+        file_retry_limit=runtime_settings.file_retry_limit,
+        share_retry_limit=runtime_settings.share_retry_limit,
+        retry_backoff_base_seconds=runtime_settings.retry_backoff_base_seconds,
     )
 
 
@@ -52,22 +65,32 @@ def build_settings_store() -> AppSettingsStore:
     return AppSettingsStore(Path(".local") / "app_settings.json")
 
 
-def build_cleanup_service(cookie: str, logger=None) -> RemoteCleanupService:
-    session = QuarkSession(cookie=cookie)
+def build_cleanup_service(cookie: str, settings: AppSettings | None = None, logger=None) -> RemoteCleanupService:
+    runtime_settings = settings or AppSettings()
+    session = QuarkSession(cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds)
     file_api = QuarkFileApi(session)
-    result_writer = ResultWriter(Path("output"))
+    result_writer = ResultWriter(Path(runtime_settings.output_dir))
     return RemoteCleanupService(file_api, result_writer=result_writer, logger=logger)
 
 
 def build_main_window() -> MainWindow:
+    settings_store = build_settings_store()
     window = MainWindow()
     window._controller = MainWindowController(
         window=window,
-        refresh_service_factory=build_refresh_service,
+        refresh_service_factory=lambda cookie: build_refresh_service(cookie, settings=settings_store.load()),
         login_dialog_factory=build_login_dialog,
-        upload_executor_factory=lambda: build_upload_executor(window.cookie_input.text().strip(), logger=window.append_log),
-        settings_store=build_settings_store(),
-        cleanup_service_factory=lambda: build_cleanup_service(window.cookie_input.text().strip(), logger=window.append_log),
+        upload_executor_factory=lambda logger_callback=None: build_upload_executor(
+            window.cookie_input.text().strip(),
+            settings=settings_store.load(),
+            logger=logger_callback or window.append_log,
+        ),
+        settings_store=settings_store,
+        cleanup_service_factory=lambda: build_cleanup_service(
+            window.cookie_input.text().strip(),
+            settings=settings_store.load(),
+            logger=window.append_log,
+        ),
         use_async_upload=True,
     )
     return window

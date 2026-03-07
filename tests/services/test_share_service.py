@@ -49,3 +49,44 @@ def test_quark_share_service_emits_debug_logs(tmp_path: Path):
     assert any("分享任务已创建" in line for line in logs)
     assert any("分享轮询成功" in line for line in logs)
     assert any("分享链接已写入" in line for line in logs)
+
+
+
+class PollingTaskApi:
+    def __init__(self):
+        self.calls = []
+
+    def get_task(self, task_id: str, retry_index: int = 0):
+        self.calls.append((task_id, retry_index))
+        if retry_index == 0:
+            return {"data": {"status": 1}}
+        return {"data": {"status": 2, "share_id": "share-1"}}
+
+
+def test_quark_share_service_waits_between_poll_attempts(tmp_path: Path):
+    writer = ResultWriter(tmp_path)
+    delays = []
+    service = QuarkShareService(
+        share_api=FakeShareApi(),
+        task_api=PollingTaskApi(),
+        result_writer=writer,
+        max_retries=2,
+        poll_interval_seconds=0.25,
+        sleep_fn=delays.append,
+    )
+
+    result = service.create_share_for_folder(fid="root-fid", title="课程A")
+
+    assert result.share_id == "share-1"
+    assert delays == [0.25]
+
+
+def test_quark_share_service_masks_share_url_in_logs(tmp_path: Path):
+    writer = ResultWriter(tmp_path)
+    logs = []
+    service = QuarkShareService(share_api=FakeShareApi(), task_api=FakeTaskApi(), result_writer=writer, logger=logs.append)
+
+    service.create_share_for_folder(fid="root-fid", title="课程A")
+
+    assert any("分享链接已写入" in line for line in logs)
+    assert all("https://pan.quark.cn/s/abc123" not in line for line in logs)

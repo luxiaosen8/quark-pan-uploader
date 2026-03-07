@@ -45,3 +45,34 @@ def test_remote_directory_sync_reuses_existing_and_creates_missing_nested_dirs()
     assert resolved.root_folder_fid == "existing-root"
     assert resolved.relative_dir_fids["chapter1"] == "existing-ch1"
     assert resolved.relative_dir_fids["chapter1/docs"].startswith("created-")
+
+
+
+def test_remote_directory_sync_caches_directory_listing_per_parent():
+    api = FakeFileApi()
+    api.list_calls = []
+    original_list_directory = api.list_directory
+
+    def tracking_list_directory(parent_fid: str):
+        api.list_calls.append(parent_fid)
+        return original_list_directory(parent_fid)
+
+    api.list_directory = tracking_list_directory
+    service = RemoteDirectorySyncService(api)
+    job = UploadJob(
+        local_name="课程A",
+        local_path="C:/课程A",
+        remote_parent_fid="remote-root",
+        file_entries=[
+            LocalFileEntry(local_name="课程A", absolute_path="C:/课程A/chapter1/docs/readme.txt", relative_path="chapter1/docs/readme.txt", size_bytes=5),
+        ],
+        remote_dir_requirements=[
+            RemoteFolderRequirement(local_name="课程A", relative_dir="chapter1", remote_parent_fid="remote-root"),
+            RemoteFolderRequirement(local_name="课程A", relative_dir="chapter1/docs", remote_parent_fid="remote-root"),
+        ],
+    )
+
+    service.ensure_job_directories(job)
+
+    assert api.list_calls.count("remote-root") == 1
+    assert api.list_calls.count("existing-root") == 1

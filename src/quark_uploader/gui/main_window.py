@@ -102,6 +102,16 @@ class MainWindow(QWidget):
     def set_current_action(self, text: str) -> None:
         self.current_action_label.setText(text)
 
+    def set_connection_state(self, connected: bool, message: str) -> None:
+        self.cookie_valid = connected
+        self.status_label.setText(message)
+        if not connected:
+            self.remote_folder_id = ""
+        self.recompute_start_enabled()
+
+    def clear_remote_tree(self) -> None:
+        self.remote_tree.clear()
+
     def populate_task_table(self, tasks: list[FolderTask]) -> None:
         self.task_table.setRowCount(len(tasks))
         for row_index, task in enumerate(tasks):

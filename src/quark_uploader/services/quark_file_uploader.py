@@ -21,8 +21,8 @@ from quark_uploader.quark.upload_api import (
 )
 from quark_uploader.services.cancellation import UploadCancellationToken
 from quark_uploader.services.file_manifest import LocalFileEntry
+from quark_uploader.services.invoke import call_with_supported_kwargs
 from quark_uploader.services.oss_transport import RequestsOssTransport
-
 
 DEFAULT_OSS_USER_AGENT = "aliyun-sdk-js/1.0.0 Chrome Mobile 139.0.0.0 on Google Nexus 5 (Android 6.0)"
 DEFAULT_COMPLETE_USER_AGENT = "aliyun-sdk-js/1.0.0 Chrome 139.0.0.0 on OS X 10.15.7 64-bit"
@@ -52,7 +52,7 @@ class QuarkFileUploader:
         self._emit_progress(progress_callback, phase="file_start", file_name=path.name, part_number=0, part_total=0)
         mime_type, _ = mimetypes.guess_type(str(path))
         mime_type = mime_type or "application/octet-stream"
-        md5_hash, sha1_hash = self._calculate_hashes(path)
+        md5_hash, sha1_hash, multipart_contexts = self._calculate_hashes_and_multipart_contexts(path)
         self._log(f"[DEBUG] 文件哈希已计算：md5={md5_hash[:8]}... sha1={sha1_hash[:8]}...")
         pre_payload = build_upload_pre_payload(
             file_name=path.name,
@@ -101,6 +101,7 @@ class QuarkFileUploader:
                     bucket=bucket,
                     mime_type=mime_type,
                     callback_info=callback_info,
+                    hash_contexts=multipart_contexts,
                     cancel_token=cancel_token,
                     progress_callback=progress_callback,
                 )
@@ -145,10 +146,13 @@ class QuarkFileUploader:
             oss_date=oss_date,
             user_agent=DEFAULT_OSS_USER_AGENT,
         )
-        try:
-            oss_upload = self.oss_transport.upload_single_part(path, parsed_auth["upload_url"], parsed_auth["headers"], cancel_token=cancel_token)
-        except TypeError:
-            oss_upload = self.oss_transport.upload_single_part(path, parsed_auth["upload_url"], parsed_auth["headers"])
+        oss_upload = call_with_supported_kwargs(
+            self.oss_transport.upload_single_part,
+            path,
+            parsed_auth["upload_url"],
+            parsed_auth["headers"],
+            cancel_token=cancel_token,
+        )
         self._log(f"[DEBUG] 单分片上传完成：etag={oss_upload.get('etag', '')}")
         xml_data = build_complete_multipart_xml([oss_upload["etag"]])
         complete_oss_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
@@ -177,17 +181,16 @@ class QuarkFileUploader:
         )
         self._log("[DEBUG] 单分片开始执行 OSS 合并完成")
         self._emit_progress(progress_callback, phase="complete", file_name=path.name, part_number=1, part_total=1)
-        try:
-            multipart_complete = self.oss_transport.complete_multipart_upload(
-                parsed_complete["upload_url"], parsed_complete["headers"], xml_data, cancel_token=cancel_token
-            )
-        except TypeError:
-            multipart_complete = self.oss_transport.complete_multipart_upload(
-                parsed_complete["upload_url"], parsed_complete["headers"], xml_data
-            )
+        multipart_complete = call_with_supported_kwargs(
+            self.oss_transport.complete_multipart_upload,
+            parsed_complete["upload_url"],
+            parsed_complete["headers"],
+            xml_data,
+            cancel_token=cancel_token,
+        )
         return complete_auth_result, oss_upload, multipart_complete
 
-    def _upload_multiple_parts(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict, cancel_token: UploadCancellationToken | None = None, progress_callback=None):
+    def _upload_multiple_parts(self, path: Path, task_id: str, auth_info: str, obj_key: str, upload_id: str, bucket: str, mime_type: str, callback_info: dict, hash_contexts: list[str], cancel_token: UploadCancellationToken | None = None, progress_callback=None):
         if not callback_info:
             raise NotImplementedError("多分片上传需要 callback 信息")
         part_etags: list[str] = []
@@ -195,13 +198,14 @@ class QuarkFileUploader:
         file_size = path.stat().st_size
         offset = 0
         part_number = 1
+        part_total = (file_size + MULTIPART_CHUNK_SIZE - 1) // MULTIPART_CHUNK_SIZE
         self._log(f"[DEBUG] 进入多分片上传：file_size={file_size} chunk_size={MULTIPART_CHUNK_SIZE}")
         while offset < file_size:
             part_size = min(MULTIPART_CHUNK_SIZE, file_size - offset)
             oss_date = datetime.now(timezone.utc).strftime('%a, %d %b %Y %H:%M:%S GMT')
-            hash_ctx = self._calculate_incremental_hash_context(path, part_number) if part_number > 1 else ""
+            hash_ctx = hash_contexts[part_number - 2] if part_number > 1 else ""
             self._log(f"[DEBUG] 获取分片上传授权：part={part_number} offset={offset} size={part_size} hash_ctx={'yes' if hash_ctx else 'no'}")
-            self._emit_progress(progress_callback, phase="part_upload", file_name=path.name, part_number=part_number, part_total=((file_size + MULTIPART_CHUNK_SIZE - 1) // MULTIPART_CHUNK_SIZE))
+            self._emit_progress(progress_callback, phase="part_upload", file_name=path.name, part_number=part_number, part_total=part_total)
             auth_meta = build_put_auth_meta(
                 mime_type=mime_type,
                 oss_date=oss_date,
@@ -226,10 +230,15 @@ class QuarkFileUploader:
                 part_number=part_number,
                 hash_ctx=hash_ctx,
             )
-            try:
-                put_result = self.oss_transport.upload_part(path, parsed_auth["upload_url"], parsed_auth["headers"], offset=offset, size=part_size, cancel_token=cancel_token)
-            except TypeError:
-                put_result = self.oss_transport.upload_part(path, parsed_auth["upload_url"], parsed_auth["headers"], offset=offset, size=part_size)
+            put_result = call_with_supported_kwargs(
+                self.oss_transport.upload_part,
+                path,
+                parsed_auth["upload_url"],
+                parsed_auth["headers"],
+                offset=offset,
+                size=part_size,
+                cancel_token=cancel_token,
+            )
             self._log(f"[DEBUG] 分片上传完成：part={part_number} etag={put_result.get('etag', '')}")
             part_etags.append(put_result["etag"])
             offset += part_size
@@ -260,22 +269,38 @@ class QuarkFileUploader:
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
         self._log("[DEBUG] 开始执行多分片 OSS 合并完成")
-        try:
-            multipart_complete = self.oss_transport.complete_multipart_upload(
-                parsed_complete["upload_url"], parsed_complete["headers"], xml_data, cancel_token=cancel_token
-            )
-        except TypeError:
-            multipart_complete = self.oss_transport.complete_multipart_upload(
-                parsed_complete["upload_url"], parsed_complete["headers"], xml_data
-            )
+        multipart_complete = call_with_supported_kwargs(
+            self.oss_transport.complete_multipart_upload,
+            parsed_complete["upload_url"],
+            parsed_complete["headers"],
+            xml_data,
+            cancel_token=cancel_token,
+        )
         return complete_auth_result, multipart_complete
 
-    def _calculate_incremental_hash_context(self, path: Path, part_number: int) -> str:
-        processed_bytes = (part_number - 1) * MULTIPART_CHUNK_SIZE
-        processed_bits = processed_bytes * 8
+    def _calculate_hashes_and_multipart_contexts(self, path: Path) -> tuple[str, str, list[str]]:
+        md5_hash = hashlib.md5()
+        sha1_hash = hashlib.sha1()
+        h0, h1, h2, h3, h4 = self._initial_sha1_state()
+        processed_bytes = 0
+        multipart_contexts: list[str] = []
         with path.open("rb") as handle:
-            previous_data = handle.read(processed_bytes)
-        h0, h1, h2, h3, h4 = self._calculate_sha1_incremental_state(previous_data)
+            for chunk in iter(lambda: handle.read(MULTIPART_CHUNK_SIZE), b""):
+                md5_hash.update(chunk)
+                sha1_hash.update(chunk)
+                full_block_length = len(chunk) - (len(chunk) % 64)
+                if full_block_length:
+                    h0, h1, h2, h3, h4 = self._apply_sha1_blocks(h0, h1, h2, h3, h4, chunk[:full_block_length])
+                processed_bytes += len(chunk)
+                multipart_contexts.append(self._encode_hash_context(h0, h1, h2, h3, h4, processed_bytes * 8))
+        if multipart_contexts:
+            multipart_contexts.pop()
+        return md5_hash.hexdigest(), sha1_hash.hexdigest(), multipart_contexts
+
+    def _initial_sha1_state(self) -> tuple[int, int, int, int, int]:
+        return 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0
+
+    def _encode_hash_context(self, h0: int, h1: int, h2: int, h3: int, h4: int, processed_bits: int) -> str:
         hash_context = {
             "hash_type": "sha1",
             "h0": str(h0),
@@ -290,15 +315,12 @@ class QuarkFileUploader:
         }
         return base64.b64encode(json.dumps(hash_context, separators=(",", ":")).encode("utf-8")).decode("utf-8")
 
-    def _calculate_sha1_incremental_state(self, data: bytes) -> tuple[int, int, int, int, int]:
-        h0 = 0x67452301
-        h1 = 0xEFCDAB89
-        h2 = 0x98BADCFE
-        h3 = 0x10325476
-        h4 = 0xC3D2E1F0
+    def _apply_sha1_blocks(self, h0: int, h1: int, h2: int, h3: int, h4: int, data: bytes) -> tuple[int, int, int, int, int]:
         data_len = len(data)
-        for i in range(0, data_len - (data_len % 64), 64):
+        for i in range(0, data_len, 64):
             block = data[i:i + 64]
+            if len(block) < 64:
+                break
             w = [struct.unpack('>I', block[j:j + 4])[0] for j in range(0, 64, 4)]
             for t in range(16, 80):
                 value = w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16]
@@ -329,12 +351,3 @@ class QuarkFileUploader:
             h3 = (h3 + d) & 0xFFFFFFFF
             h4 = (h4 + e) & 0xFFFFFFFF
         return h0, h1, h2, h3, h4
-
-    def _calculate_hashes(self, path: Path) -> tuple[str, str]:
-        md5_hash = hashlib.md5()
-        sha1_hash = hashlib.sha1()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                md5_hash.update(chunk)
-                sha1_hash.update(chunk)
-        return md5_hash.hexdigest(), sha1_hash.hexdigest()

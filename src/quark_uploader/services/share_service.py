@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from time import sleep
+
 from pydantic import BaseModel
 
 from quark_uploader.services.cancellation import UploadCancellationToken
+from quark_uploader.services.secrets import mask_share_url
 from quark_uploader.services.share_policy import build_share_payload
 
 
@@ -12,11 +15,22 @@ class ShareCreationResult(BaseModel):
 
 
 class QuarkShareService:
-    def __init__(self, share_api, task_api, result_writer=None, max_retries: int = 10, logger=None) -> None:
+    def __init__(
+        self,
+        share_api,
+        task_api,
+        result_writer=None,
+        max_retries: int = 10,
+        poll_interval_seconds: float = 0.0,
+        sleep_fn=sleep,
+        logger=None,
+    ) -> None:
         self.share_api = share_api
         self.task_api = task_api
         self.result_writer = result_writer
         self.max_retries = max_retries
+        self.poll_interval_seconds = poll_interval_seconds
+        self.sleep_fn = sleep_fn
         self.logger = logger
 
     def _log(self, message: str) -> None:
@@ -43,6 +57,8 @@ class QuarkShareService:
                 break
             if task_data.get("status") == 3:
                 raise RuntimeError(task_data.get("message", "分享创建失败"))
+            if retry_index < self.max_retries - 1 and self.poll_interval_seconds > 0:
+                self.sleep_fn(self.poll_interval_seconds)
         if not share_id:
             raise RuntimeError("分享创建超时")
         if cancel_token is not None:
@@ -53,5 +69,5 @@ class QuarkShareService:
         result = ShareCreationResult(share_id=share_id, share_url=share_url)
         if self.result_writer is not None and share_url:
             self.result_writer.append_share_url(share_url)
-            self._log(f"[DEBUG] 分享链接已写入：share_url={share_url}")
+            self._log(f"[DEBUG] 分享链接已写入：share_url={mask_share_url(share_url)}")
         return result

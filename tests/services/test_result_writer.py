@@ -17,14 +17,15 @@ def test_result_writer_appends_urls_line_by_line(tmp_path: Path):
 
 def test_result_writer_writes_share_result_jsonl_and_csv(tmp_path: Path):
     writer = ResultWriter(tmp_path, run_id="run-1")
-    writer.append_share_result({
+    record = {
         "run_id": "run-1",
         "local_folder_name": "课程A",
         "status": "completed",
         "share_url": "https://example.com/a",
         "retry_count": 1,
         "error_message": "",
-    })
+    }
+    writer.append_share_result(record)
 
     jsonl_rows = (tmp_path / "runs" / "run-1" / "share_results.jsonl").read_text(encoding="utf-8").splitlines()
     payload = json.loads(jsonl_rows[0])
@@ -35,6 +36,10 @@ def test_result_writer_writes_share_result_jsonl_and_csv(tmp_path: Path):
         rows = list(csv.DictReader(handle))
     assert rows[0]["status"] == "completed"
     assert rows[0]["share_url"] == "https://example.com/a"
+
+    with (tmp_path / "share_results.csv").open(encoding="utf-8") as handle:
+        root_rows = list(csv.DictReader(handle))
+    assert root_rows[0]["run_id"] == "run-1"
 
 
 def test_result_writer_writes_event_jsonl(tmp_path: Path):
@@ -47,6 +52,12 @@ def test_result_writer_writes_event_jsonl(tmp_path: Path):
     assert payload["phase"] == "upload"
     assert payload["folder_name"] == "课程A"
 
+    daily_logs = list((tmp_path / "logs").glob("*.jsonl"))
+    assert len(daily_logs) == 1
+    daily_payload = json.loads(daily_logs[0].read_text(encoding="utf-8").splitlines()[0])
+    assert daily_payload["stage"] == "upload"
+    assert daily_payload["folder_name"] == "课程A"
+
 
 def test_structured_logger_writes_jsonl_records(tmp_path: Path):
     logger = StructuredLogger(tmp_path / "logs.jsonl")
@@ -57,7 +68,6 @@ def test_structured_logger_writes_jsonl_records(tmp_path: Path):
     assert payload["level"] == "INFO"
     assert payload["stage"] == "scan"
     assert payload["folder_name"] == "folder-a"
-
 
 
 def test_result_writer_event_file_created_even_with_multiple_entries(tmp_path: Path):

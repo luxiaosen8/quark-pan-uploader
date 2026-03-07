@@ -272,3 +272,33 @@ def test_controller_stop_upload_requests_worker_cancellation(qtbot, tmp_path: Pa
     assert handle.started is True
     assert handle.stop_requested is True
     assert "[WARN] 用户请求停止上传" in window.log_output.toPlainText()
+
+
+
+def test_controller_marks_empty_folder_skipped_and_excludes_it_from_upload_plan(qtbot, tmp_path: Path):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    empty_folder = tmp_path / "空目录"
+    empty_folder.mkdir()
+    lesson = tmp_path / "课程A"
+    lesson.mkdir()
+    (lesson / "cover.txt").write_text("12", encoding="utf-8")
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success: FakeLoginDialog(),
+    )
+    window.cookie_valid = True
+    window.remote_folder_id = "folder-1"
+
+    controller.apply_local_root(str(tmp_path))
+    controller.start_upload()
+
+    assert window.task_table.rowCount() == 2
+    assert window.task_table.item(0, 0).text() == "空目录"
+    assert window.task_table.item(0, 3).text() == "skipped"
+    assert controller.current_upload_plan is not None
+    assert [job.local_name for job in controller.current_upload_plan.jobs] == ["课程A"]
+    assert "跳过空目录：空目录" in window.log_output.toPlainText()

@@ -192,3 +192,35 @@ def test_upload_execution_engine_returns_stopped_when_uploader_raises_cancelled(
 
     assert result.status == "stopped"
     assert result.error_message == "stopped by user"
+
+
+
+def test_upload_execution_engine_emits_retrying_and_sharing_statuses():
+    uploader = FlakyUploader()
+    share_service = FakeShareService()
+    statuses = []
+    engine = UploadExecutionEngine(
+        directory_sync_service=FakeDirectorySyncService(),
+        uploader=uploader,
+        share_service=share_service,
+    )
+
+    engine.execute_job(build_job(), status_callback=lambda status, share_url="", retry_count=0: statuses.append((status, retry_count)))
+
+    assert ("retrying", 1) in statuses
+    assert any(status == "sharing" for status, _ in statuses)
+
+
+def test_upload_execution_engine_uses_backoff_before_retry():
+    uploader = FlakyUploader()
+    delays = []
+    engine = UploadExecutionEngine(
+        directory_sync_service=FakeDirectorySyncService(),
+        uploader=uploader,
+        retry_backoff_base_seconds=0.25,
+        sleep_fn=delays.append,
+    )
+
+    engine.execute_job(build_job())
+
+    assert delays == [0.25]

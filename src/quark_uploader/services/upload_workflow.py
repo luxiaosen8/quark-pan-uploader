@@ -30,6 +30,8 @@ class UploadExecutionPlan(BaseModel):
 def build_upload_plan(remote_parent_fid: str, tasks: list[FolderTask]) -> UploadExecutionPlan:
     jobs: list[UploadJob] = []
     for task in tasks:
+        if not task.can_execute:
+            continue
         file_entries = build_folder_file_manifest(task)
         remote_dir_requirements = build_remote_folder_requirements(task, remote_parent_fid, file_entries)
         jobs.append(

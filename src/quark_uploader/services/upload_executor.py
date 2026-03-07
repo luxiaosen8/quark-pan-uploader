@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import PurePosixPath
+from time import sleep
 
 from pydantic import BaseModel
 
+from quark_uploader.models import FolderTaskStatus
 from quark_uploader.services.cancellation import UploadCancellationToken, UploadCancelled
+from quark_uploader.services.invoke import call_with_supported_kwargs
 from quark_uploader.services.remote_directory_sync import ResolvedRemoteDirectory
 from quark_uploader.services.upload_workflow import UploadJob
 
@@ -16,7 +19,7 @@ class UploadExecutionResult(BaseModel):
     share_url: str = ""
     share_id: str = ""
     retry_count: int = 0
-    status: str = "completed"
+    status: str = FolderTaskStatus.COMPLETED.value
     error_message: str = ""
     started_at: str = ""
     finished_at: str = ""
@@ -32,6 +35,8 @@ class UploadExecutionEngine:
         logger=None,
         file_retry_limit: int = 1,
         share_retry_limit: int = 1,
+        retry_backoff_base_seconds: float = 0.0,
+        sleep_fn=sleep,
     ) -> None:
         self.directory_sync_service = directory_sync_service
         self.uploader = uploader
@@ -40,6 +45,8 @@ class UploadExecutionEngine:
         self.logger = logger
         self.file_retry_limit = file_retry_limit
         self.share_retry_limit = share_retry_limit
+        self.retry_backoff_base_seconds = retry_backoff_base_seconds
+        self.sleep_fn = sleep_fn
 
     def _log(self, message: str) -> None:
         if self.logger is not None:
@@ -49,12 +56,19 @@ class UploadExecutionEngine:
         if self.result_writer is not None:
             self.result_writer.append_event(level, phase, message, **extra)
 
-    def execute_job(self, job: UploadJob, cancel_token: UploadCancellationToken | None = None, progress_callback=None) -> UploadExecutionResult:
+    def _sleep_for_retry(self, attempt: int) -> None:
+        delay = self.retry_backoff_base_seconds * attempt
+        if delay > 0:
+            self.sleep_fn(delay)
+
+    def execute_job(self, job: UploadJob, cancel_token: UploadCancellationToken | None = None, progress_callback=None, status_callback=None) -> UploadExecutionResult:
         started_at = datetime.now().isoformat()
         retry_count = 0
         uploaded_files = 0
         root_folder_fid = ""
         self._append_event("INFO", "job", "job start", folder_name=job.local_name, total_files=len(job.file_entries))
+        if status_callback is not None:
+            status_callback(FolderTaskStatus.UPLOADING.value, retry_count=retry_count)
         try:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
@@ -68,11 +82,16 @@ class UploadExecutionEngine:
                     if cancel_token is not None:
                         cancel_token.raise_if_cancelled()
                     try:
-                        try:
-                            self.uploader.upload_file(entry, parent_fid, cancel_token=cancel_token, progress_callback=progress_callback)
-                        except TypeError:
-                            self.uploader.upload_file(entry, parent_fid)
+                        call_with_supported_kwargs(
+                            self.uploader.upload_file,
+                            entry,
+                            parent_fid,
+                            cancel_token=cancel_token,
+                            progress_callback=progress_callback,
+                        )
                         uploaded_files += 1
+                        if status_callback is not None:
+                            status_callback(FolderTaskStatus.UPLOADING.value, retry_count=retry_count)
                         break
                     except UploadCancelled:
                         raise
@@ -81,25 +100,28 @@ class UploadExecutionEngine:
                             raise
                         attempts += 1
                         retry_count += 1
+                        if status_callback is not None:
+                            status_callback(FolderTaskStatus.RETRYING.value, retry_count=retry_count)
                         self._log(f"[WARN] 重试上传文件：file={entry.relative_path} attempt={attempts} error={exc}")
                         self._append_event("WARN", "upload", "retry file upload", file_name=entry.relative_path, attempt=attempts, error=str(exc))
+                        self._sleep_for_retry(attempts)
 
             share_id = ""
             share_url = ""
             if self.share_service is not None:
+                if status_callback is not None:
+                    status_callback(FolderTaskStatus.SHARING.value, retry_count=retry_count)
                 share_attempt = 0
                 while True:
                     if cancel_token is not None:
                         cancel_token.raise_if_cancelled()
                     try:
-                        try:
-                            share_result = self.share_service.create_share_for_folder(
-                                fid=resolved.root_folder_fid,
-                                title=job.local_name,
-                                cancel_token=cancel_token,
-                            )
-                        except TypeError:
-                            share_result = self.share_service.create_share_for_folder(fid=resolved.root_folder_fid, title=job.local_name)
+                        share_result = call_with_supported_kwargs(
+                            self.share_service.create_share_for_folder,
+                            fid=resolved.root_folder_fid,
+                            title=job.local_name,
+                            cancel_token=cancel_token,
+                        )
                         share_id = share_result.share_id
                         share_url = share_result.share_url
                         break
@@ -110,8 +132,13 @@ class UploadExecutionEngine:
                             raise
                         share_attempt += 1
                         retry_count += 1
+                        if status_callback is not None:
+                            status_callback(FolderTaskStatus.RETRYING.value, retry_count=retry_count)
                         self._log(f"[WARN] 重试创建分享：folder={job.local_name} attempt={share_attempt} error={exc}")
                         self._append_event("WARN", "share", "retry share creation", folder_name=job.local_name, attempt=share_attempt, error=str(exc))
+                        self._sleep_for_retry(share_attempt)
+                        if status_callback is not None:
+                            status_callback(FolderTaskStatus.SHARING.value, retry_count=retry_count)
 
             result = UploadExecutionResult(
                 root_folder_fid=root_folder_fid,
@@ -119,7 +146,7 @@ class UploadExecutionEngine:
                 share_id=share_id,
                 share_url=share_url,
                 retry_count=retry_count,
-                status="completed",
+                status=FolderTaskStatus.COMPLETED.value,
                 started_at=started_at,
                 finished_at=datetime.now().isoformat(),
             )
@@ -131,7 +158,7 @@ class UploadExecutionEngine:
                 root_folder_fid=root_folder_fid,
                 uploaded_files=uploaded_files,
                 retry_count=retry_count,
-                status="stopped",
+                status=FolderTaskStatus.STOPPED.value,
                 error_message=str(exc),
                 started_at=started_at,
                 finished_at=datetime.now().isoformat(),
@@ -144,7 +171,7 @@ class UploadExecutionEngine:
                 root_folder_fid=root_folder_fid,
                 uploaded_files=uploaded_files,
                 retry_count=retry_count + 1,
-                status="failed",
+                status=FolderTaskStatus.FAILED.value,
                 error_message=str(exc),
                 started_at=started_at,
                 finished_at=datetime.now().isoformat(),
@@ -160,7 +187,9 @@ class UploadExecutionEngine:
             "run_id": self.result_writer.run_id,
             "local_folder_name": job.local_name,
             "local_folder_path": job.local_path,
+            "remote_folder_name": job.local_name,
             "remote_parent_fid": job.remote_parent_fid,
+            "remote_folder_fid": result.root_folder_fid,
             "remote_root_fid": result.root_folder_fid,
             "total_files": len(job.file_entries),
             "uploaded_files": result.uploaded_files,
@@ -169,6 +198,7 @@ class UploadExecutionEngine:
             "status": result.status,
             "retry_count": result.retry_count,
             "error_message": result.error_message,
+            "created_at": result.finished_at,
             "started_at": result.started_at,
             "finished_at": result.finished_at,
         })

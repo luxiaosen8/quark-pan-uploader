@@ -159,3 +159,29 @@ def test_open_official_login_passes_window_to_dialog_factory(qtbot):
     controller.open_official_login()
 
     assert record["parent"] is window
+
+
+class FailingRefreshService:
+    def refresh(self):
+        raise RuntimeError("cookie expired")
+
+
+def test_controller_refresh_failure_resets_remote_state(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.cookie_input.setText("sid=expired")
+    window.remote_folder_id = "folder-1"
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FailingRefreshService(),
+        login_dialog_factory=lambda on_success: FakeLoginDialog(None),
+    )
+
+    controller.refresh_drive()
+
+    assert window.cookie_valid is False
+    assert window.remote_folder_id == ""
+    assert window.remote_tree.topLevelItemCount() == 0
+    assert "网盘信息刷新失败：cookie expired" in window.log_output.toPlainText()

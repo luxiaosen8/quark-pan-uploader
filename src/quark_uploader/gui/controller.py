@@ -4,15 +4,17 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from quark_uploader.settings import AppSettings
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 
 from quark_uploader.gui.main_window import MainWindow
 from quark_uploader.gui.workers import UploadWorker, UploadWorkerHandle
+from quark_uploader.models import FolderTaskStatus
 from quark_uploader.services.cancellation import UploadCancellationToken
+from quark_uploader.services.invoke import call_with_supported_kwargs, call_with_supported_positional_args
 from quark_uploader.services.remote_cleanup_service import RemoteCleanupService
-from quark_uploader.services.scanner import scan_first_level_subfolders
+from quark_uploader.services.scanner import EMPTY_FOLDER_MESSAGE, scan_first_level_subfolders
 from quark_uploader.services.upload_workflow import build_upload_plan
+from quark_uploader.settings import AppSettings
 
 
 class MainWindowController:
@@ -40,6 +42,7 @@ class MainWindowController:
         self.current_refresh_service = None
         self.current_folder_tasks = []
         self.current_upload_plan = None
+        self.current_settings = AppSettings()
 
         self.window.refresh_button.clicked.connect(self.refresh_drive)
         self.window.official_login_button.clicked.connect(self.open_official_login)
@@ -55,20 +58,25 @@ class MainWindowController:
 
     def _load_settings(self) -> None:
         if self.settings_store is None:
+            self.current_settings = AppSettings()
             return
-        settings = self.settings_store.load()
-        self.window.remember_cookie_checkbox.setChecked(settings.save_cookie)
-        if settings.persisted_cookie:
-            self.window.cookie_input.setText(settings.persisted_cookie)
+        self.current_settings = self.settings_store.load()
+        self.window.remember_cookie_checkbox.setChecked(self.current_settings.save_cookie)
+        if self.current_settings.persisted_cookie:
+            self.window.cookie_input.setText(self.current_settings.persisted_cookie)
 
     def _persist_settings(self) -> None:
         if self.settings_store is None:
             return
-        settings = AppSettings(
-            save_cookie=self.window.remember_cookie_checkbox.isChecked(),
-            persisted_cookie=self.window.cookie_input.text().strip() if self.window.remember_cookie_checkbox.isChecked() else "",
-        )
+        settings = self.current_settings.model_copy(update={
+            'save_cookie': self.window.remember_cookie_checkbox.isChecked(),
+            'persisted_cookie': self.window.cookie_input.text().strip() if self.window.remember_cookie_checkbox.isChecked() else '',
+        })
         self.settings_store.save(settings)
+        self.current_settings = settings
+
+    def _output_dir(self) -> Path:
+        return Path(self.current_settings.output_dir)
 
     def browse_local_root(self) -> None:
         path = QFileDialog.getExistingDirectory(self.window, "选择本地文件夹")
@@ -76,7 +84,9 @@ class MainWindowController:
             self.apply_local_root(path)
 
     def open_output_directory(self) -> None:
-        os.startfile(str(Path("output").resolve()))
+        output_dir = self._output_dir()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(output_dir.resolve()))
 
     def cleanup_remote_test_directories(self) -> None:
         service = self.cleanup_service_factory() if self.cleanup_service_factory is not None else None
@@ -91,37 +101,52 @@ class MainWindowController:
     def apply_local_root(self, path: str) -> None:
         tasks = scan_first_level_subfolders(Path(path))
         self.current_folder_tasks = tasks
+        executable_count = sum(1 for task in tasks if task.can_execute)
+        skipped_count = len(tasks) - executable_count
         self.window.set_local_root(path)
         self.window.populate_task_table(tasks)
-        self.window.set_progress_summary(completed=0, total=len(tasks), failed=0)
+        self.window.set_progress_summary(completed=0, total=executable_count, failed=0)
         self.window.set_current_action("当前动作：等待上传")
         self.window.append_log(f"[INFO] 已扫描 {len(tasks)} 个一级子文件夹")
+        self.window.append_log(f"[INFO] 可执行任务 {executable_count} 个")
+        for task in tasks:
+            if task.status is FolderTaskStatus.SKIPPED and task.error_message == EMPTY_FOLDER_MESSAGE:
+                self.window.append_log(f"[INFO] 跳过空目录：{task.local_name}")
+        if skipped_count:
+            self.window.append_log(f"[INFO] 已跳过 {skipped_count} 个空目录")
 
     def refresh_drive(self) -> None:
         cookie = self.window.cookie_input.text().strip()
         if not cookie:
-            self.window.status_label.setText("缺少 Cookie")
+            self.window.set_connection_state(False, "缺少 Cookie")
             self.window.append_log("[WARN] 请先输入 Cookie 或使用官方登录")
             return
 
-        service = self.refresh_service_factory(cookie)
-        result = service.refresh()
+        try:
+            service = self.refresh_service_factory(cookie)
+            result = service.refresh()
+        except Exception as exc:
+            self.current_refresh_service = None
+            self.window.clear_remote_tree()
+            self.window.set_connection_state(False, f"连接失败：{exc}")
+            self.window.append_log(f"[ERROR] 网盘信息刷新失败：{exc}")
+            return
+
         self.current_refresh_service = service
-        self.window.cookie_valid = True
-        self.window.status_label.setText("已连接")
+        self.window.set_connection_state(True, "已连接")
         self.window.set_account_summary(result.account)
         self.window.populate_remote_tree(result.root_nodes)
         self.window.append_log("[INFO] 网盘信息刷新成功")
-        self.window.recompute_start_enabled()
         self._persist_settings()
 
     def open_official_login(self) -> None:
         self.window.append_log("[INFO] 正在打开官方登录窗口...")
         try:
-            try:
-                dialog = self.login_dialog_factory(self.validate_cookie_string, self.window)
-            except TypeError:
-                dialog = self.login_dialog_factory(self.validate_cookie_string)
+            dialog = call_with_supported_positional_args(
+                self.login_dialog_factory,
+                self.validate_cookie_string,
+                self.window,
+            )
             if hasattr(dialog, "setWindowTitle"):
                 dialog.setWindowTitle(getattr(dialog, "windowTitle", lambda: "官方登录")())
             if hasattr(dialog, "setModal"):
@@ -168,7 +193,6 @@ class MainWindowController:
                     child_item.addChild(QTreeWidgetItem(["加载中...", ""]))
                 item.addChild(child_item)
 
-
     def _build_worker_handle(self, plan):
         cancel_token = UploadCancellationToken()
         if self.upload_worker_factory is not None:
@@ -190,6 +214,8 @@ class MainWindowController:
         self.window.start_button.setEnabled(True)
         if final_state == "stopped":
             self.window.append_log("[WARN] 上传已停止")
+        elif final_state == "completed_with_errors":
+            self.window.append_log("[WARN] 上传已完成，但存在失败任务")
 
     def stop_upload(self) -> None:
         if self.current_upload_handle is None:
@@ -204,7 +230,8 @@ class MainWindowController:
         self.window.stop_button.setEnabled(False)
 
     def start_upload(self) -> None:
-        if not self.current_folder_tasks:
+        executable_count = sum(1 for task in self.current_folder_tasks if task.can_execute)
+        if executable_count == 0:
             self.window.append_log("[WARN] 当前没有可上传的子文件夹")
             return
         if not self.window.remote_folder_id:
@@ -212,40 +239,53 @@ class MainWindowController:
             return
         self.current_upload_plan = build_upload_plan(self.window.remote_folder_id, self.current_folder_tasks)
         total = len(self.current_upload_plan.jobs)
+        if total == 0:
+            self.window.append_log("[WARN] 当前没有可上传的子文件夹")
+            return
         for job in self.current_upload_plan.jobs:
-            self.window.update_task_status(job.local_name, "uploading")
+            self.window.update_task_status(job.local_name, FolderTaskStatus.UPLOADING.value)
         self.window.set_progress_summary(completed=0, total=total, failed=0)
         self.window.append_log(
             f"[INFO] 已创建上传计划，共 {len(self.current_upload_plan.jobs)} 个子文件夹任务"
         )
         self.window.start_button.setEnabled(False)
         self.window.stop_button.setEnabled(True)
-        if self.upload_executor_factory is not None and self.use_async_upload:
+        if self.upload_executor_factory is None:
+            return
+        if self.use_async_upload:
             self.current_upload_handle = self._build_worker_handle(self.current_upload_plan)
             self.current_upload_handle.start()
             return
-        if self.upload_executor_factory is not None:
-            executor = self.upload_executor_factory()
-            failed = 0
-            completed = 0
-            for job in self.current_upload_plan.jobs:
-                self.window.set_current_action(f"当前任务：{job.local_name}")
-                try:
-                    result = executor.execute_job(job)
-                except Exception as exc:
-                    failed += 1
-                    self.window.update_task_status(job.local_name, "failed")
-                    self.window.append_log(f"[ERROR] 上传失败：{job.local_name} -> {exc}")
-                    self.window.set_progress_summary(completed=completed, total=total, failed=failed)
-                    continue
-                completed += 1
-                self.window.update_task_status(job.local_name, getattr(result, 'status', 'completed'), getattr(result, 'share_url', ''), retry_count=getattr(result, 'retry_count', 0))
-                self.window.append_log(
-                    f"[INFO] 上传骨架执行完成：{job.local_name} ({result.uploaded_files} 文件)"
-                )
-                if getattr(result, "share_url", ""):
-                    self.window.append_log(f"[INFO] 分享链接：{result.share_url}")
+
+        executor = self.upload_executor_factory()
+        failed = 0
+        completed = 0
+        for job in self.current_upload_plan.jobs:
+            self.window.set_current_action(f"当前任务：{job.local_name}")
+            status_callback = lambda status, share_url="", retry_count=0, local_name=job.local_name: self.window.update_task_status(
+                local_name,
+                status,
+                share_url,
+                retry_count,
+            )
+            try:
+                result = call_with_supported_kwargs(executor.execute_job, job, status_callback=status_callback)
+            except Exception as exc:
+                failed += 1
+                self.window.update_task_status(job.local_name, FolderTaskStatus.FAILED.value)
+                self.window.append_log(f"[ERROR] 上传失败：{job.local_name} -> {exc}")
                 self.window.set_progress_summary(completed=completed, total=total, failed=failed)
-            self.window.set_current_action("当前动作：空闲")
-            self.window.stop_button.setEnabled(False)
-            self.window.start_button.setEnabled(True)
+                continue
+            completed += 1
+            self.window.update_task_status(job.local_name, getattr(result, 'status', FolderTaskStatus.COMPLETED.value), getattr(result, 'share_url', ''), retry_count=getattr(result, 'retry_count', 0))
+            self.window.append_log(
+                f"[INFO] 上传骨架执行完成：{job.local_name} ({result.uploaded_files} 文件)"
+            )
+            if getattr(result, "share_url", ""):
+                self.window.append_log(f"[INFO] 分享链接：{result.share_url}")
+            self.window.set_progress_summary(completed=completed, total=total, failed=failed)
+        self.window.set_current_action("当前动作：空闲")
+        self.window.stop_button.setEnabled(False)
+        self.window.start_button.setEnabled(True)
+        if failed:
+            self.window.append_log("[WARN] 上传已完成，但存在失败任务")

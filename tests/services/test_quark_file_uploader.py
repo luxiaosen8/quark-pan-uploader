@@ -134,3 +134,17 @@ def test_quark_file_uploader_emits_progress_events_for_multipart_flow(tmp_path: 
     assert any(evt.get("phase") == "part_upload" and evt.get("part_number") == 1 for evt in events)
     assert any(evt.get("phase") == "part_upload" and evt.get("part_number") == 2 for evt in events)
     assert any(evt.get("phase") == "finish" for evt in events)
+
+
+
+def test_quark_file_uploader_precomputes_hash_contexts_for_multipart_file(tmp_path: Path):
+    file_path = tmp_path / "large.bin"
+    file_path.write_bytes(b"0" * (5 * 1024 * 1024 + 1))
+    uploader = QuarkFileUploader(upload_api=FakeUploadApi(), oss_transport=FakeOssTransport())
+
+    md5_hash, sha1_hash, contexts = uploader._calculate_hashes_and_multipart_contexts(file_path)
+
+    assert len(md5_hash) == 32
+    assert len(sha1_hash) == 40
+    assert len(contexts) == 1
+    assert contexts[0]
