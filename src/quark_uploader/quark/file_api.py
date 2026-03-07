@@ -26,6 +26,14 @@ def build_create_directory_payload(parent_fid: str, folder_name: str) -> dict[st
     }
 
 
+def build_delete_files_payload(file_ids: list[str]) -> dict:
+    return {
+        "action_type": 2,
+        "filelist": file_ids,
+        "exclude_fids": [],
+    }
+
+
 class QuarkFileApi:
     def __init__(self, session: QuarkSession) -> None:
         self.session = session
@@ -38,4 +46,11 @@ class QuarkFileApi:
             "POST",
             "/1/clouddrive/file",
             json=build_create_directory_payload(parent_fid, folder_name),
+        )
+
+    def delete_files(self, file_ids: list[str]) -> dict:
+        return self.session.request(
+            "POST",
+            "/1/clouddrive/file/delete",
+            json=build_delete_files_payload(file_ids),
         )

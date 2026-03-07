@@ -1,4 +1,4 @@
-from quark_uploader.quark.file_api import build_create_directory_payload, build_sort_params
+from quark_uploader.quark.file_api import build_create_directory_payload, build_delete_files_payload, build_sort_params
 from quark_uploader.quark.user_api import build_capacity_info_url
 
 
@@ -20,3 +20,9 @@ def test_build_create_directory_payload_contains_required_fields():
 
 def test_build_capacity_info_url_points_to_growth_info_endpoint():
     assert build_capacity_info_url().endswith("/1/clouddrive/capacity/growth/info")
+
+
+
+def test_build_delete_files_payload_contains_expected_fields():
+    payload = build_delete_files_payload(["a", "b"])
+    assert payload == {"action_type": 2, "filelist": ["a", "b"], "exclude_fids": []}

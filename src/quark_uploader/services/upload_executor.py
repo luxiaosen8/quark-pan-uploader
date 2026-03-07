@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import PurePosixPath
 
 from pydantic import BaseModel
@@ -13,27 +14,125 @@ class UploadExecutionResult(BaseModel):
     uploaded_files: int = 0
     share_url: str = ""
     share_id: str = ""
+    retry_count: int = 0
+    status: str = "completed"
+    error_message: str = ""
+    started_at: str = ""
+    finished_at: str = ""
 
 
 class UploadExecutionEngine:
-    def __init__(self, directory_sync_service, uploader, share_service=None) -> None:
+    def __init__(
+        self,
+        directory_sync_service,
+        uploader,
+        share_service=None,
+        result_writer=None,
+        logger=None,
+        file_retry_limit: int = 1,
+        share_retry_limit: int = 1,
+    ) -> None:
         self.directory_sync_service = directory_sync_service
         self.uploader = uploader
         self.share_service = share_service
+        self.result_writer = result_writer
+        self.logger = logger
+        self.file_retry_limit = file_retry_limit
+        self.share_retry_limit = share_retry_limit
+
+    def _log(self, message: str) -> None:
+        if self.logger is not None:
+            self.logger(message)
+
+    def _append_event(self, level: str, phase: str, message: str, **extra: object) -> None:
+        if self.result_writer is not None:
+            self.result_writer.append_event(level, phase, message, **extra)
 
     def execute_job(self, job: UploadJob) -> UploadExecutionResult:
+        started_at = datetime.now().isoformat()
+        retry_count = 0
+        self._append_event("INFO", "job", "job start", folder_name=job.local_name, total_files=len(job.file_entries))
         resolved = self.directory_sync_service.ensure_job_directories(job)
         uploaded_files = 0
-        for entry in job.file_entries:
-            parent_fid = self._resolve_target_parent_fid(entry.relative_path, resolved)
-            self.uploader.upload_file(entry, parent_fid)
-            uploaded_files += 1
-        result = UploadExecutionResult(root_folder_fid=resolved.root_folder_fid, uploaded_files=uploaded_files)
-        if self.share_service is not None:
-            share_result = self.share_service.create_share_for_folder(fid=resolved.root_folder_fid, title=job.local_name)
-            result.share_id = share_result.share_id
-            result.share_url = share_result.share_url
-        return result
+        try:
+            for entry in job.file_entries:
+                parent_fid = self._resolve_target_parent_fid(entry.relative_path, resolved)
+                attempts = 0
+                while True:
+                    try:
+                        self.uploader.upload_file(entry, parent_fid)
+                        uploaded_files += 1
+                        break
+                    except Exception as exc:
+                        if attempts >= self.file_retry_limit:
+                            raise
+                        attempts += 1
+                        retry_count += 1
+                        self._log(f"[WARN] 重试上传文件：file={entry.relative_path} attempt={attempts} error={exc}")
+                        self._append_event("WARN", "upload", "retry file upload", file_name=entry.relative_path, attempt=attempts, error=str(exc))
+            share_id = ""
+            share_url = ""
+            if self.share_service is not None:
+                share_attempt = 0
+                while True:
+                    try:
+                        share_result = self.share_service.create_share_for_folder(fid=resolved.root_folder_fid, title=job.local_name)
+                        share_id = share_result.share_id
+                        share_url = share_result.share_url
+                        break
+                    except Exception as exc:
+                        if share_attempt >= self.share_retry_limit:
+                            raise
+                        share_attempt += 1
+                        retry_count += 1
+                        self._log(f"[WARN] 重试创建分享：folder={job.local_name} attempt={share_attempt} error={exc}")
+                        self._append_event("WARN", "share", "retry share creation", folder_name=job.local_name, attempt=share_attempt, error=str(exc))
+            result = UploadExecutionResult(
+                root_folder_fid=resolved.root_folder_fid,
+                uploaded_files=uploaded_files,
+                share_id=share_id,
+                share_url=share_url,
+                retry_count=retry_count,
+                status="completed",
+                started_at=started_at,
+                finished_at=datetime.now().isoformat(),
+            )
+            self._append_event("INFO", "job", "job completed", folder_name=job.local_name, uploaded_files=result.uploaded_files, share_url=result.share_url)
+            self._write_result(job, result)
+            return result
+        except Exception as exc:
+            result = UploadExecutionResult(
+                root_folder_fid=resolved.root_folder_fid,
+                uploaded_files=uploaded_files,
+                retry_count=retry_count + 1,
+                status="failed",
+                error_message=str(exc),
+                started_at=started_at,
+                finished_at=datetime.now().isoformat(),
+            )
+            self._append_event("ERROR", "job", "job failed", folder_name=job.local_name, error=result.error_message)
+            self._write_result(job, result)
+            raise
+
+    def _write_result(self, job: UploadJob, result: UploadExecutionResult) -> None:
+        if self.result_writer is None:
+            return
+        self.result_writer.append_share_result({
+            "run_id": self.result_writer.run_id,
+            "local_folder_name": job.local_name,
+            "local_folder_path": job.local_path,
+            "remote_parent_fid": job.remote_parent_fid,
+            "remote_root_fid": result.root_folder_fid,
+            "total_files": len(job.file_entries),
+            "uploaded_files": result.uploaded_files,
+            "share_id": result.share_id,
+            "share_url": result.share_url,
+            "status": result.status,
+            "retry_count": result.retry_count,
+            "error_message": result.error_message,
+            "started_at": result.started_at,
+            "finished_at": result.finished_at,
+        })
 
     def _resolve_target_parent_fid(self, relative_path: str, resolved: ResolvedRemoteDirectory) -> str:
         parent_dir = PurePosixPath(relative_path).parent.as_posix()

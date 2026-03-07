@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class FolderTaskStatus(str, Enum):
     PENDING = "pending"
     UPLOADING = "uploading"
+    RETRYING = "retrying"
     SHARING = "sharing"
     COMPLETED = "completed"
     FAILED = "failed"

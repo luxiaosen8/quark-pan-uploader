@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QCheckBox,
+    QProgressBar,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -32,15 +33,22 @@ class MainWindow(QWidget):
         self.remember_cookie_checkbox.setChecked(True)
         self.refresh_button = QPushButton("刷新网盘")
         self.select_local_folder_button = QPushButton("选择本地文件夹")
+        self.open_output_button = QPushButton("打开输出目录")
+        self.cleanup_test_dirs_button = QPushButton("清理测试目录")
         self.status_label = QLabel("未连接")
         self.account_label = QLabel("账号：未加载")
         self.local_root_label = QLabel("本地目录：未选择")
+        self.progress_summary_label = QLabel("任务进度：0/0，失败 0")
+        self.current_action_label = QLabel("当前动作：空闲")
+        self.overall_progress_bar = QProgressBar()
+        self.overall_progress_bar.setRange(0, 100)
+        self.overall_progress_bar.setValue(0)
         self.start_button = QPushButton("开始上传")
         self.stop_button = QPushButton("停止")
         self.remote_tree = QTreeWidget()
         self.remote_tree.setHeaderLabels(["网盘目录", "FID"])
-        self.task_table = QTableWidget(0, 5)
-        self.task_table.setHorizontalHeaderLabels(["子文件夹", "文件数", "总大小", "状态", "分享链接"])
+        self.task_table = QTableWidget(0, 6)
+        self.task_table.setHorizontalHeaderLabels(["子文件夹", "文件数", "总大小", "状态", "分享链接", "重试"])
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
         self.start_button.setEnabled(False)
@@ -52,6 +60,8 @@ class MainWindow(QWidget):
 
         local_button_row = QHBoxLayout()
         local_button_row.addWidget(self.select_local_folder_button)
+        local_button_row.addWidget(self.open_output_button)
+        local_button_row.addWidget(self.cleanup_test_dirs_button)
 
         layout = QVBoxLayout()
         layout.addWidget(self.cookie_input)
@@ -59,6 +69,9 @@ class MainWindow(QWidget):
         layout.addWidget(self.status_label)
         layout.addWidget(self.account_label)
         layout.addWidget(self.local_root_label)
+        layout.addWidget(self.progress_summary_label)
+        layout.addWidget(self.current_action_label)
+        layout.addWidget(self.overall_progress_bar)
         layout.addLayout(local_button_row)
         layout.addWidget(self.task_table)
         layout.addWidget(self.remote_tree)
@@ -82,6 +95,13 @@ class MainWindow(QWidget):
         self.local_root_label.setText(f"本地目录：{path}")
         self.recompute_start_enabled()
 
+    def set_progress_summary(self, completed: int, total: int, failed: int) -> None:
+        self.progress_summary_label.setText(f"任务进度：{completed}/{total}，失败 {failed}")
+        self.overall_progress_bar.setValue(0 if total == 0 else int(completed / total * 100))
+
+    def set_current_action(self, text: str) -> None:
+        self.current_action_label.setText(text)
+
     def populate_task_table(self, tasks: list[FolderTask]) -> None:
         self.task_table.setRowCount(len(tasks))
         for row_index, task in enumerate(tasks):
@@ -90,13 +110,14 @@ class MainWindow(QWidget):
             self.task_table.setItem(row_index, 2, QTableWidgetItem(str(task.total_size)))
             self.task_table.setItem(row_index, 3, QTableWidgetItem(task.status.value))
             self.task_table.setItem(row_index, 4, QTableWidgetItem(task.share_url or ""))
+            self.task_table.setItem(row_index, 5, QTableWidgetItem("0"))
 
-
-    def update_task_status(self, local_name: str, status: str, share_url: str = "") -> None:
+    def update_task_status(self, local_name: str, status: str, share_url: str = "", retry_count: int = 0) -> None:
         for row_index in range(self.task_table.rowCount()):
             name_item = self.task_table.item(row_index, 0)
             if name_item and name_item.text() == local_name:
                 self.task_table.setItem(row_index, 3, QTableWidgetItem(status))
+                self.task_table.setItem(row_index, 5, QTableWidgetItem(str(retry_count)))
                 if share_url:
                     self.task_table.setItem(row_index, 4, QTableWidgetItem(share_url))
                 break

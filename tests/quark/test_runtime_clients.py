@@ -116,3 +116,15 @@ def test_share_api_create_share_uses_post_json_payload():
     assert http.calls[0]["method"] == "POST"
     assert http.calls[0]["url"].endswith("/1/clouddrive/share")
     assert http.calls[0]["json"]["title"] == "lesson-a"
+
+
+
+def test_file_api_delete_files_calls_delete_endpoint():
+    http = DummyHTTP()
+    session = QuarkSession(cookie="sid=123", http=http)
+
+    QuarkFileApi(session).delete_files(["a", "b"])
+
+    assert http.calls[0]["method"] == "POST"
+    assert http.calls[0]["url"].endswith("/1/clouddrive/file/delete")
+    assert http.calls[0]["json"]["filelist"] == ["a", "b"]

@@ -14,6 +14,7 @@ from quark_uploader.quark.upload_api import QuarkUploadApi
 from quark_uploader.quark.user_api import QuarkUserApi
 from quark_uploader.services.quark_file_uploader import QuarkFileUploader
 from quark_uploader.services.refresh_service import DriveRefreshService
+from quark_uploader.services.remote_cleanup_service import RemoteCleanupService
 from quark_uploader.services.remote_directory_sync import RemoteDirectorySyncService
 from quark_uploader.services.result_writer import ResultWriter
 from quark_uploader.services.share_service import QuarkShareService
@@ -38,6 +39,8 @@ def build_upload_executor(cookie: str, logger=None) -> UploadExecutionEngine:
         directory_sync_service=RemoteDirectorySyncService(file_api),
         uploader=QuarkFileUploader(upload_api=upload_api, logger=logger),
         share_service=share_service,
+        result_writer=result_writer,
+        logger=logger,
     )
 
 
@@ -57,6 +60,7 @@ def build_main_window() -> MainWindow:
         login_dialog_factory=build_login_dialog,
         upload_executor_factory=lambda: build_upload_executor(window.cookie_input.text().strip(), logger=window.append_log),
         settings_store=build_settings_store(),
+        cleanup_service_factory=lambda: RemoteCleanupService(QuarkFileApi(QuarkSession(window.cookie_input.text().strip()))),
     )
     return window
 

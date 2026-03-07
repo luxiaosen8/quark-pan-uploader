@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -7,6 +8,7 @@ from quark_uploader.settings import AppSettings
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 
 from quark_uploader.gui.main_window import MainWindow
+from quark_uploader.services.remote_cleanup_service import RemoteCleanupService
 from quark_uploader.services.scanner import scan_first_level_subfolders
 from quark_uploader.services.upload_workflow import build_upload_plan
 
@@ -19,12 +21,14 @@ class MainWindowController:
         login_dialog_factory: Callable[[Callable[[str], bool]], object],
         upload_executor_factory: Callable[[], object] | None = None,
         settings_store=None,
+        cleanup_service_factory: Callable[[], object] | None = None,
     ) -> None:
         self.window = window
         self.refresh_service_factory = refresh_service_factory
         self.login_dialog_factory = login_dialog_factory
         self.upload_executor_factory = upload_executor_factory
         self.settings_store = settings_store
+        self.cleanup_service_factory = cleanup_service_factory
         self.current_refresh_service = None
         self.current_folder_tasks = []
         self.current_upload_plan = None
@@ -32,11 +36,12 @@ class MainWindowController:
         self.window.refresh_button.clicked.connect(self.refresh_drive)
         self.window.official_login_button.clicked.connect(self.open_official_login)
         self.window.select_local_folder_button.clicked.connect(self.browse_local_root)
+        self.window.open_output_button.clicked.connect(self.open_output_directory)
+        self.window.cleanup_test_dirs_button.clicked.connect(self.cleanup_remote_test_directories)
         self.window.start_button.clicked.connect(self.start_upload)
         self.window.remote_tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
         self._load_settings()
         self.window.remote_tree.itemExpanded.connect(self.on_tree_item_expanded)
-
 
     def _load_settings(self) -> None:
         if self.settings_store is None:
@@ -60,11 +65,26 @@ class MainWindowController:
         if path:
             self.apply_local_root(path)
 
+    def open_output_directory(self) -> None:
+        os.startfile(str(Path("output").resolve()))
+
+    def cleanup_remote_test_directories(self) -> None:
+        service = self.cleanup_service_factory() if self.cleanup_service_factory is not None else None
+        if service is None:
+            if self.current_refresh_service is None:
+                self.window.append_log("[WARN] 请先刷新网盘后再清理测试目录")
+                return
+            service = RemoteCleanupService(self.current_refresh_service.file_api)
+        result = service.cleanup_test_directories()
+        self.window.append_log(f"[INFO] 已清理测试目录：{len(result.deleted_names)} 个")
+
     def apply_local_root(self, path: str) -> None:
         tasks = scan_first_level_subfolders(Path(path))
         self.current_folder_tasks = tasks
         self.window.set_local_root(path)
         self.window.populate_task_table(tasks)
+        self.window.set_progress_summary(completed=0, total=len(tasks), failed=0)
+        self.window.set_current_action("当前动作：等待上传")
         self.window.append_log(f"[INFO] 已扫描 {len(tasks)} 个一级子文件夹")
 
     def refresh_drive(self) -> None:
@@ -146,6 +166,9 @@ class MainWindowController:
             self.window.append_log("[WARN] 请先选择网盘目标目录")
             return
         self.current_upload_plan = build_upload_plan(self.window.remote_folder_id, self.current_folder_tasks)
+        total = len(self.current_upload_plan.jobs)
+        failed = 0
+        completed = 0
         for job in self.current_upload_plan.jobs:
             self.window.update_task_status(job.local_name, "uploading")
         self.window.append_log(
@@ -154,15 +177,21 @@ class MainWindowController:
         if self.upload_executor_factory is not None:
             executor = self.upload_executor_factory()
             for job in self.current_upload_plan.jobs:
+                self.window.set_current_action(f"当前任务：{job.local_name}")
                 try:
                     result = executor.execute_job(job)
                 except Exception as exc:
+                    failed += 1
                     self.window.update_task_status(job.local_name, "failed")
                     self.window.append_log(f"[ERROR] 上传失败：{job.local_name} -> {exc}")
+                    self.window.set_progress_summary(completed=completed, total=total, failed=failed)
                     continue
-                self.window.update_task_status(job.local_name, "completed", getattr(result, "share_url", ""))
+                completed += 1
+                self.window.update_task_status(job.local_name, getattr(result, 'status', 'completed'), getattr(result, 'share_url', ''), retry_count=getattr(result, 'retry_count', 0))
                 self.window.append_log(
                     f"[INFO] 上传骨架执行完成：{job.local_name} ({result.uploaded_files} 文件)"
                 )
                 if getattr(result, "share_url", ""):
                     self.window.append_log(f"[INFO] 分享链接：{result.share_url}")
+                self.window.set_progress_summary(completed=completed, total=total, failed=failed)
+            self.window.set_current_action("当前动作：空闲")

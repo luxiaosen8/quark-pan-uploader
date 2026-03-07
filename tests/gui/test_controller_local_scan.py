@@ -171,3 +171,59 @@ def test_controller_updates_share_link_when_executor_returns_share(qtbot, tmp_pa
 
     assert window.task_table.item(0, 3).text() == "completed"
     assert window.task_table.item(0, 4).text() == "https://pan.quark.cn/s/abc123"
+
+
+
+class FakeCleanupResult:
+    deleted_names = ["codex-small-111", "codex-large-222"]
+
+
+class FakeCleanupService:
+    def cleanup_test_directories(self):
+        return FakeCleanupResult()
+
+
+def test_controller_updates_progress_and_retry_count_when_executor_returns_retrying_result(qtbot, tmp_path: Path):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    lesson = tmp_path / "课程A"
+    lesson.mkdir()
+    (lesson / "cover.txt").write_text("12", encoding="utf-8")
+
+    class RetryExecutor:
+        def execute_job(self, job):
+            return type("Result", (), {"uploaded_files": 1, "share_url": "", "retry_count": 2, "status": "completed"})()
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success, parent=None: FakeLoginDialog(),
+        upload_executor_factory=lambda: RetryExecutor(),
+    )
+    window.cookie_valid = True
+    window.remote_folder_id = "folder-1"
+    controller.apply_local_root(str(tmp_path))
+
+    controller.start_upload()
+
+    assert window.task_table.item(0, 5).text() == "2"
+    assert window.overall_progress_bar.value() == 100
+    assert "任务进度：1/1，失败 0" == window.progress_summary_label.text()
+
+
+def test_controller_can_cleanup_remote_test_directories(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success, parent=None: FakeLoginDialog(),
+        cleanup_service_factory=lambda: FakeCleanupService(),
+    )
+
+    controller.cleanup_remote_test_directories()
+
+    assert "已清理测试目录：2 个" in window.log_output.toPlainText()
