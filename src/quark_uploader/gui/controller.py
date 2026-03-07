@@ -16,10 +16,12 @@ class MainWindowController:
         window: MainWindow,
         refresh_service_factory: Callable[[str], object],
         login_dialog_factory: Callable[[Callable[[str], bool]], object],
+        upload_executor_factory: Callable[[], object] | None = None,
     ) -> None:
         self.window = window
         self.refresh_service_factory = refresh_service_factory
         self.login_dialog_factory = login_dialog_factory
+        self.upload_executor_factory = upload_executor_factory
         self.current_refresh_service = None
         self.current_folder_tasks = []
         self.current_upload_plan = None
@@ -108,3 +110,11 @@ class MainWindowController:
         self.window.append_log(
             f"[INFO] 已创建上传计划，共 {len(self.current_upload_plan.jobs)} 个子文件夹任务"
         )
+        if self.upload_executor_factory is not None:
+            executor = self.upload_executor_factory()
+            for job in self.current_upload_plan.jobs:
+                result = executor.execute_job(job)
+                self.window.update_task_status(job.local_name, "completed")
+                self.window.append_log(
+                    f"[INFO] 上传骨架执行完成：{job.local_name} ({result.uploaded_files} 文件)"
+                )
