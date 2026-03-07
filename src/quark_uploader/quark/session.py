@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import requests
 
@@ -32,3 +33,25 @@ class QuarkSession:
 
     def make_url(self, path: str) -> str:
         return f"{self.base_url}{path}"
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        merged_params = dict(self.base_params)
+        if params:
+            merged_params.update(params)
+        response = self.http.request(
+            method=method,
+            url=self.make_url(path),
+            headers=self.headers,
+            params=merged_params,
+            json=json,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        return response.json()
