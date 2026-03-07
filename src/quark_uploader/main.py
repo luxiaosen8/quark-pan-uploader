@@ -17,6 +17,7 @@ from quark_uploader.services.refresh_service import DriveRefreshService
 from quark_uploader.services.remote_directory_sync import RemoteDirectorySyncService
 from quark_uploader.services.result_writer import ResultWriter
 from quark_uploader.services.share_service import QuarkShareService
+from quark_uploader.services.settings_store import AppSettingsStore
 from quark_uploader.services.upload_executor import UploadExecutionEngine
 
 
@@ -40,8 +41,12 @@ def build_upload_executor(cookie: str) -> UploadExecutionEngine:
     )
 
 
-def build_login_dialog(cookie_validator):
-    return OfficialLoginDialog(cookie_validator=cookie_validator)
+def build_login_dialog(cookie_validator, parent=None):
+    return OfficialLoginDialog(cookie_validator=cookie_validator, parent=parent)
+
+
+def build_settings_store() -> AppSettingsStore:
+    return AppSettingsStore(Path(".local") / "app_settings.json")
 
 
 def build_main_window() -> MainWindow:
@@ -51,6 +56,7 @@ def build_main_window() -> MainWindow:
         refresh_service_factory=build_refresh_service,
         login_dialog_factory=build_login_dialog,
         upload_executor_factory=lambda: build_upload_executor(window.cookie_input.text().strip()),
+        settings_store=build_settings_store(),
     )
     return window
 

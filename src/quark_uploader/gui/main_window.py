@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QCheckBox,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -27,6 +28,8 @@ class MainWindow(QWidget):
         self.cookie_input = QLineEdit()
         self.cookie_input.setPlaceholderText("请粘贴 Cookie，或点击‘官方登录’")
         self.official_login_button = QPushButton("官方登录")
+        self.remember_cookie_checkbox = QCheckBox("记住 Cookie")
+        self.remember_cookie_checkbox.setChecked(True)
         self.refresh_button = QPushButton("刷新网盘")
         self.select_local_folder_button = QPushButton("选择本地文件夹")
         self.status_label = QLabel("未连接")
@@ -44,6 +47,7 @@ class MainWindow(QWidget):
 
         auth_button_row = QHBoxLayout()
         auth_button_row.addWidget(self.official_login_button)
+        auth_button_row.addWidget(self.remember_cookie_checkbox)
         auth_button_row.addWidget(self.refresh_button)
 
         local_button_row = QHBoxLayout()

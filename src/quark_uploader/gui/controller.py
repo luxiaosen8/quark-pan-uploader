@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from quark_uploader.settings import AppSettings
 from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 
 from quark_uploader.gui.main_window import MainWindow
@@ -17,11 +18,13 @@ class MainWindowController:
         refresh_service_factory: Callable[[str], object],
         login_dialog_factory: Callable[[Callable[[str], bool]], object],
         upload_executor_factory: Callable[[], object] | None = None,
+        settings_store=None,
     ) -> None:
         self.window = window
         self.refresh_service_factory = refresh_service_factory
         self.login_dialog_factory = login_dialog_factory
         self.upload_executor_factory = upload_executor_factory
+        self.settings_store = settings_store
         self.current_refresh_service = None
         self.current_folder_tasks = []
         self.current_upload_plan = None
@@ -31,7 +34,26 @@ class MainWindowController:
         self.window.select_local_folder_button.clicked.connect(self.browse_local_root)
         self.window.start_button.clicked.connect(self.start_upload)
         self.window.remote_tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
+        self._load_settings()
         self.window.remote_tree.itemExpanded.connect(self.on_tree_item_expanded)
+
+
+    def _load_settings(self) -> None:
+        if self.settings_store is None:
+            return
+        settings = self.settings_store.load()
+        self.window.remember_cookie_checkbox.setChecked(settings.save_cookie)
+        if settings.persisted_cookie:
+            self.window.cookie_input.setText(settings.persisted_cookie)
+
+    def _persist_settings(self) -> None:
+        if self.settings_store is None:
+            return
+        settings = AppSettings(
+            save_cookie=self.window.remember_cookie_checkbox.isChecked(),
+            persisted_cookie=self.window.cookie_input.text().strip() if self.window.remember_cookie_checkbox.isChecked() else "",
+        )
+        self.settings_store.save(settings)
 
     def browse_local_root(self) -> None:
         path = QFileDialog.getExistingDirectory(self.window, "选择本地文件夹")
@@ -61,6 +83,7 @@ class MainWindowController:
         self.window.populate_remote_tree(result.root_nodes)
         self.window.append_log("[INFO] 网盘信息刷新成功")
         self.window.recompute_start_enabled()
+        self._persist_settings()
 
     def open_official_login(self) -> None:
         self.window.append_log("[INFO] 正在打开官方登录窗口...")
@@ -86,6 +109,7 @@ class MainWindowController:
         if accepted and cookie_string:
             self.window.cookie_input.setText(cookie_string)
             self.window.append_log("[INFO] 已获取官方登录 Cookie")
+            self._persist_settings()
 
     def validate_cookie_string(self, cookie_string: str) -> bool:
         try:
