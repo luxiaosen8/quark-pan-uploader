@@ -1,5 +1,5 @@
 from quark_uploader.app import create_app
-from quark_uploader.main import build_main_window, build_upload_executor
+from quark_uploader.main import build_cleanup_service, build_main_window, build_upload_executor
 
 
 def test_build_upload_executor_returns_engine_with_execute_job():
@@ -22,3 +22,9 @@ def test_build_upload_executor_accepts_logger_callback():
     engine.uploader._log("hello-uploader")
     engine.share_service._log("hello-share")
     assert logs == ["hello-uploader", "hello-share"]
+
+
+
+def test_build_cleanup_service_includes_result_writer():
+    service = build_cleanup_service("sid=123")
+    assert service.result_writer is not None

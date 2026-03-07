@@ -52,6 +52,13 @@ def build_settings_store() -> AppSettingsStore:
     return AppSettingsStore(Path(".local") / "app_settings.json")
 
 
+def build_cleanup_service(cookie: str, logger=None) -> RemoteCleanupService:
+    session = QuarkSession(cookie=cookie)
+    file_api = QuarkFileApi(session)
+    result_writer = ResultWriter(Path("output"))
+    return RemoteCleanupService(file_api, result_writer=result_writer, logger=logger)
+
+
 def build_main_window() -> MainWindow:
     window = MainWindow()
     window._controller = MainWindowController(
@@ -60,7 +67,7 @@ def build_main_window() -> MainWindow:
         login_dialog_factory=build_login_dialog,
         upload_executor_factory=lambda: build_upload_executor(window.cookie_input.text().strip(), logger=window.append_log),
         settings_store=build_settings_store(),
-        cleanup_service_factory=lambda: RemoteCleanupService(QuarkFileApi(QuarkSession(window.cookie_input.text().strip()))),
+        cleanup_service_factory=lambda: build_cleanup_service(window.cookie_input.text().strip(), logger=window.append_log),
         use_async_upload=True,
     )
     return window
