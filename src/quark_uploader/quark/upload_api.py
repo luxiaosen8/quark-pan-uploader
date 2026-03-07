@@ -49,6 +49,57 @@ def build_upload_finish_payload(task_id: str, obj_key: str | None = None) -> dic
     return payload
 
 
+def build_put_auth_meta(
+    mime_type: str,
+    oss_date: str,
+    bucket: str,
+    obj_key: str,
+    upload_id: str,
+    part_number: int,
+    user_agent: str,
+    hash_ctx: str = "",
+) -> str:
+    lines = [
+        "PUT",
+        "",
+        mime_type,
+        oss_date,
+        f"x-oss-date:{oss_date}",
+    ]
+    if hash_ctx:
+        lines.append(f"x-oss-hash-ctx:{hash_ctx}")
+    lines.append(f"x-oss-user-agent:{user_agent}")
+    lines.append(f"/{bucket}/{obj_key}?partNumber={part_number}&uploadId={upload_id}")
+    return "\n".join(lines)
+
+
+def parse_upload_auth_result(
+    auth_result: dict,
+    bucket: str,
+    obj_key: str,
+    upload_id: str,
+    mime_type: str,
+    oss_date: str,
+    user_agent: str,
+    part_number: int = 1,
+    hash_ctx: str = "",
+) -> dict:
+    auth_key = auth_result.get("data", {}).get("auth_key", "")
+    headers = {
+        "Content-Type": mime_type,
+        "x-oss-date": oss_date,
+        "x-oss-user-agent": user_agent,
+    }
+    if auth_key:
+        headers["authorization"] = auth_key
+    if hash_ctx:
+        headers["X-Oss-Hash-Ctx"] = hash_ctx
+    return {
+        "upload_url": f"https://{bucket}.pds.quark.cn/{obj_key}?partNumber={part_number}&uploadId={upload_id}",
+        "headers": headers,
+    }
+
+
 class QuarkUploadApi:
     def __init__(self, session: QuarkSession) -> None:
         self.session = session

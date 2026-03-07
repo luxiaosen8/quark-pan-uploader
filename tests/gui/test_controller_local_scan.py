@@ -111,3 +111,33 @@ def test_controller_start_upload_can_execute_with_injected_executor(qtbot, tmp_p
     assert executor.jobs == ["课程A"]
     assert window.task_table.item(0, 3).text() == "completed"
     assert "上传骨架执行完成：课程A (1 文件)" in window.log_output.toPlainText()
+
+
+
+class FailingExecutor:
+    def execute_job(self, job):
+        raise RuntimeError("upload failed")
+
+
+def test_controller_marks_task_failed_when_executor_raises(qtbot, tmp_path: Path):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    lesson = tmp_path / "课程A"
+    lesson.mkdir()
+    (lesson / "cover.txt").write_text("12", encoding="utf-8")
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success: FakeLoginDialog(),
+        upload_executor_factory=lambda: FailingExecutor(),
+    )
+    window.cookie_valid = True
+    window.remote_folder_id = "folder-1"
+    controller.apply_local_root(str(tmp_path))
+
+    controller.start_upload()
+
+    assert window.task_table.item(0, 3).text() == "failed"
+    assert "上传失败：课程A -> upload failed" in window.log_output.toPlainText()

@@ -113,7 +113,12 @@ class MainWindowController:
         if self.upload_executor_factory is not None:
             executor = self.upload_executor_factory()
             for job in self.current_upload_plan.jobs:
-                result = executor.execute_job(job)
+                try:
+                    result = executor.execute_job(job)
+                except Exception as exc:
+                    self.window.update_task_status(job.local_name, "failed")
+                    self.window.append_log(f"[ERROR] 上传失败：{job.local_name} -> {exc}")
+                    continue
                 self.window.update_task_status(job.local_name, "completed")
                 self.window.append_log(
                     f"[INFO] 上传骨架执行完成：{job.local_name} ({result.uploaded_files} 文件)"
