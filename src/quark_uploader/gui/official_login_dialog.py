@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from threading import Thread
 from typing import Callable
 
-from PySide6.QtCore import QObject, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -13,20 +14,9 @@ from quark_uploader.services.cookie_capture import format_cookie_header, is_quar
 from quark_uploader.services.official_login import OFFICIAL_LOGIN_PAGE_URL, OFFICIAL_MOBILE_LOGIN_URL
 
 
-class CookieValidationWorker(QObject):
-    finished = Signal(str, bool)
-
-    def __init__(self, cookie_validator: Callable[[str], bool], candidate: str) -> None:
-        super().__init__()
-        self.cookie_validator = cookie_validator
-        self.candidate = candidate
-
-    @Slot()
-    def run(self) -> None:
-        self.finished.emit(self.candidate, bool(self.cookie_validator(self.candidate)))
-
-
 class OfficialLoginDialog(QDialog):
+    validation_finished = Signal(str, bool)
+
     def __init__(self, cookie_validator: Callable[[str], bool], parent=None) -> None:
         super().__init__(parent)
         self.cookie_validator = cookie_validator
@@ -36,10 +26,9 @@ class OfficialLoginDialog(QDialog):
         self._validation_timer.setSingleShot(True)
         self._validation_timer.setInterval(800)
         self._validation_timer.timeout.connect(self._validate_and_finish)
-        self._validation_thread: QThread | None = None
-        self._validation_worker: CookieValidationWorker | None = None
         self._validation_in_progress = False
         self._pending_candidate = ""
+        self.validation_finished.connect(self._on_validation_finished)
 
         self.setWindowTitle("官方登录")
         self.resize(960, 720)
@@ -107,18 +96,11 @@ class OfficialLoginDialog(QDialog):
         self._validation_in_progress = True
         self.status_label.setText("正在验证 Cookie…")
 
-        thread = QThread(self)
-        worker = CookieValidationWorker(self.cookie_validator, candidate)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_validation_finished)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._clear_validation_thread)
-        self._validation_thread = thread
-        self._validation_worker = worker
-        thread.start()
+        def run_validation() -> None:
+            result = bool(self.cookie_validator(candidate))
+            self.validation_finished.emit(candidate, result)
+
+        Thread(target=run_validation, daemon=True).start()
 
     @Slot(str, bool)
     def _on_validation_finished(self, candidate: str, is_valid: bool) -> None:
@@ -135,7 +117,3 @@ class OfficialLoginDialog(QDialog):
             self._start_pending_validation()
             return
         self.status_label.setText("已捕获部分 Cookie，等待完成登录…")
-
-    def _clear_validation_thread(self) -> None:
-        self._validation_thread = None
-        self._validation_worker = None
