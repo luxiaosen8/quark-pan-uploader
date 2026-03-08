@@ -140,3 +140,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 - 表格状态
 - 日志面板
 - `share_results.csv` / `share_results.jsonl`
+
+
+## Debug 启动跟踪
+
+- 正式版默认不生成 `bootstrap_trace.log`
+- 仅在 debug 模式启用：
+  - 环境变量：`QUARK_UPLOADER_DEBUG=1`
+  - 或设置文件：`debug_mode=true`

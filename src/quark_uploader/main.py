@@ -26,7 +26,19 @@ from quark_uploader.services.upload_executor import UploadExecutionEngine
 from quark_uploader.settings import AppSettings
 
 
+def _bootstrap_trace_enabled() -> bool:
+    env_value = os.getenv("QUARK_UPLOADER_DEBUG", "").strip().lower()
+    if env_value in {"1", "true", "yes", "on"}:
+        return True
+    try:
+        return build_settings_store().load().debug_mode
+    except Exception:
+        return False
+
+
 def _write_bootstrap_trace(stage: str, **extra: object) -> None:
+    if not _bootstrap_trace_enabled():
+        return
     try:
         trace_path = get_runtime_root() / 'bootstrap_trace.log'
         with trace_path.open('a', encoding='utf-8') as handle:

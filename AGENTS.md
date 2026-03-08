@@ -54,3 +54,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 ## UI 约束
 
 - 前端测试用的“清理测试目录”按钮已从正式 UI 中移除
+
+
+## Debug 启动跟踪
+
+- 正式版默认不生成 `bootstrap_trace.log`
+- 仅在 debug 模式启用：
+  - 环境变量：`QUARK_UPLOADER_DEBUG=1`
+  - 或设置文件：`debug_mode=true`

@@ -10,3 +10,10 @@ def test_folder_task_defaults_to_pending_status():
 def test_app_settings_default_output_dir():
     settings = AppSettings()
     assert settings.output_dir == "output"
+
+
+def test_app_settings_debug_mode_defaults_to_false():
+    from quark_uploader.settings import AppSettings
+
+    settings = AppSettings()
+    assert settings.debug_mode is False

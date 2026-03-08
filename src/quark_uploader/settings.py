@@ -13,3 +13,4 @@ class AppSettings(BaseModel):
     share_poll_max_retries: int = 10
     retry_backoff_base_seconds: float = 0.5
     share_poll_interval_seconds: float = 0.5
+    debug_mode: bool = False
