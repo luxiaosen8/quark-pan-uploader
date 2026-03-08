@@ -1,47 +1,56 @@
-# Quark Uploader
+# Quark Pan Uploader
 
-一个基于 **Python 3.12 + PySide6** 的 Windows 桌面工具，用于批量上传本地内容到夸克网盘并生成分享链接。
+[![Release](https://img.shields.io/github/v/release/luxiaosen8/quark-pan-uploader?display_name=tag)](https://github.com/luxiaosen8/quark-pan-uploader/releases)
+[![MIT License](https://img.shields.io/github/license/luxiaosen8/quark-pan-uploader)](./LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 
-## 功能概览
+一个基于 **Python 3.12 + PySide6** 的 Windows 桌面工具，用于将本地文件批量上传到夸克网盘，并在上传完成后生成分享链接。
 
-- 使用 Cookie 或官方登录流程连接夸克网盘
-- 刷新并选择目标网盘目录
-- 支持两种上传模式：
-  - `batch_subfolders`：扫描本地根目录下一级子文件夹并逐项上传
-  - `single_target`：直接上传单个文件夹或单个文件
-- 为上传完成的远端项目创建分享链接
-- 输出根目录汇总结果与按运行归档的详细结果
-- 主界面采用“上栏操作区 + 下栏标签页工作台”布局，便于查看任务、目录与日志
+## 截图
 
-## 环境要求
+![Quark Pan Uploader main window](./assets/readme-main-window.png)
+
+## 功能亮点
+
+- **批量子文件夹上传**：扫描本地根目录下一级子文件夹并逐项执行上传
+- **单目标上传**：支持直接上传单个文件夹或单个文件
+- **远端目录选择**：刷新并浏览夸克网盘目录树，选择上传目标位置
+- **分享链接生成**：上传完成后自动为远端项目创建分享链接
+- **结构化输出**：生成结果汇总、运行归档与日志输出目录
+- **桌面化工作台 UI**：上栏操作区 + 下栏标签页工作区，适合持续操作与结果查看
+
+## 快速开始
+
+### 环境要求
 
 - Windows 10 / 11
 - Python 3.12+
-- 建议使用虚拟环境运行
+- 建议使用虚拟环境
 
-## 安装
+### 安装依赖
 
-### 方式一：使用项目虚拟环境
+#### 方式一：使用标准虚拟环境
 
 ```bat
 python -m venv .venv
-.\.venv\Scriptsctivate
+.\.venv\Scripts\activate
 python -m pip install -e .
 ```
 
-### 方式二：使用 uv
+#### 方式二：使用 uv
 
 ```bat
 uv sync
 ```
 
-## 启动应用
+### 启动应用
 
 ```bat
 python -m quark_uploader.main
 ```
 
-如果你在虚拟环境中运行，也可以显式使用虚拟环境解释器：
+如果你已经处于项目虚拟环境，也可以使用：
 
 ```bat
 .\.venv\Scripts\python.exe -m quark_uploader.main
@@ -50,22 +59,14 @@ python -m quark_uploader.main
 ## 使用流程
 
 1. 输入 Cookie，或点击 **官方登录**
-2. 点击 **刷新网盘** 获取远端目录
-3. 选择本地来源（批量子文件夹 / 单文件夹 / 单文件）
-4. 在远端目录中选择上传目标
+2. 点击 **刷新网盘** 获取远端目录树
+3. 选择本地来源：
+   - 批量子文件夹
+   - 单文件夹
+   - 单文件
+4. 选择网盘中的远端目标目录
 5. 点击 **开始上传** 执行任务
-6. 在任务页、目录页与日志页查看执行结果
-
-## 输出与配置
-
-默认输出目录为 `output/`。
-
-运行时会使用：
-
-- `output/`：结果与日志输出目录
-- `.local/app_settings.json`：本地设置文件
-
-程序会在运行时自动创建所需目录与文件；这些本地产物默认不应提交到版本控制。
+6. 在 **上传任务 / 目标网盘目录 / 运行日志** 标签页中查看进度与结果
 
 ## 打包
 
@@ -78,30 +79,43 @@ python -m quark_uploader.main
 执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scriptsuild_windows.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 ```
+
+## 输出与配置
+
+运行时默认会使用以下本地目录：
+
+- `output/`：结果与日志输出目录
+- `.local/app_settings.json`：本地设置文件
+
+这些目录会在运行时自动创建，属于本地运行产物，不应提交到版本控制。
 
 ## 安全说明
 
-- 不要提交真实 Cookie、令牌、日志、`.env`、`.local/`、`output/` 或构建产物
-- 如果需要共享问题样例，请先对 Cookie、链接、目录名和日志内容进行脱敏
-- 调试模式下可能生成额外日志，请在公开分享前确认已清理
+- 不要提交真实 Cookie、Token、`.env`、日志或输出目录内容
+- 共享问题样例前，请先脱敏 Cookie、分享链接、目录名和日志内容
+- 调试模式下可能生成额外日志，公开分享前请确认已清理
 
-## 公开仓库说明
+更多说明见：[SECURITY.md](./SECURITY.md)
 
-当前公开仓库聚焦于：
+## 已知限制
 
-- 应用源码
-- 打包脚本
-- 面向公开协作的基础文档
+- 当前项目主要面向 **Windows 桌面环境**
+- 依赖夸克网盘有效登录态或 Cookie
+- 当前公开仓库聚焦应用源码与公开协作文档，不包含内部测试与过程性设计文件
 
-内部测试资产、过程性设计草案和本地协作文档不包含在公开发布版本中。
+## 发布信息
+
+- 仓库地址：[luxiaosen8/quark-pan-uploader](https://github.com/luxiaosen8/quark-pan-uploader)
+- 最新发布：[Releases](https://github.com/luxiaosen8/quark-pan-uploader/releases)
+- 首个公开版本：[`v0.1.0`](https://github.com/luxiaosen8/quark-pan-uploader/releases/tag/v0.1.0)
+
+## 协作
+
+- 贡献说明：[CONTRIBUTING.md](./CONTRIBUTING.md)
+- 安全策略：[SECURITY.md](./SECURITY.md)
 
 ## 许可证
 
 本项目采用 [MIT License](./LICENSE)。
-
-## 相关文档
-
-- [SECURITY.md](./SECURITY.md)
-- [CONTRIBUTING.md](./CONTRIBUTING.md)
