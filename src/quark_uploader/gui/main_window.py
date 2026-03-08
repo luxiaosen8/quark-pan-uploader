@@ -92,6 +92,10 @@ class MainWindow(QWidget):
         self.controls_body_layout.setSpacing(8)
         self.controls_scroll.setWidget(self.controls_body)
 
+        self.summary_card_title.hide()
+        summary_subtitle = self.summary_layout.itemAt(1).widget()
+        if summary_subtitle is not None:
+            summary_subtitle.hide()
         self._configure_widgets()
         self._build_layout()
         self._apply_styles()
@@ -107,7 +111,7 @@ class MainWindow(QWidget):
         card.setProperty("card", True)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         title_label = QLabel(title)
         title_label.setObjectName("sectionTitle")
@@ -139,7 +143,7 @@ class MainWindow(QWidget):
         self.open_output_button.setObjectName("secondaryButton")
 
         self.cookie_input.setClearButtonEnabled(True)
-        self.cookie_input.setMinimumHeight(38)
+        self.cookie_input.setMinimumHeight(34)
 
         self.remote_tree.setAlternatingRowColors(True)
         self.remote_tree.setMinimumHeight(260)
@@ -164,6 +168,8 @@ class MainWindow(QWidget):
         self.controls_card.setMinimumWidth(430)
         self.remote_card.setMinimumWidth(520)
         self.remote_tree.setMinimumHeight(220)
+        self.task_card.setMaximumHeight(120)
+        self.log_card.setMaximumHeight(90)
         self.log_output.setMinimumHeight(90)
         self.log_output.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.log_output.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
@@ -187,6 +193,7 @@ class MainWindow(QWidget):
         self.summary_layout.addLayout(summary_meta_row)
         self.summary_layout.addWidget(self.overall_progress_bar)
 
+        self.controls_layout.itemAt(1).widget().hide()
         self.controls_layout.addWidget(self.controls_scroll, 1)
 
         self.controls_body_layout.addWidget(self._create_subsection_label("账号连接"))
@@ -201,11 +208,11 @@ class MainWindow(QWidget):
         self.controls_body_layout.addSpacing(2)
         self.controls_body_layout.addWidget(self._create_subsection_label("本地与输出"))
         self.controls_body_layout.addWidget(self.local_root_label)
-        local_button_column = QVBoxLayout()
-        local_button_column.setSpacing(10)
-        local_button_column.addWidget(self.select_local_folder_button)
-        local_button_column.addWidget(self.open_output_button)
-        self.controls_body_layout.addLayout(local_button_column)
+        local_button_row = QHBoxLayout()
+        local_button_row.setSpacing(10)
+        local_button_row.addWidget(self.select_local_folder_button)
+        local_button_row.addWidget(self.open_output_button)
+        self.controls_body_layout.addLayout(local_button_row)
 
         self.controls_body_layout.addSpacing(2)
         self.controls_body_layout.addWidget(self._create_subsection_label("任务控制"))
@@ -229,23 +236,16 @@ class MainWindow(QWidget):
         self.top_splitter.setStretchFactor(0, 0)
         self.top_splitter.setStretchFactor(1, 1)
         self.top_splitter.setSizes([430, 820])
+        self.top_splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        self.lower_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.lower_splitter.setChildrenCollapsible(False)
-        self.lower_splitter.addWidget(self.task_card)
-        self.lower_splitter.addWidget(self.log_card)
-        self.lower_splitter.setStretchFactor(0, 3)
-        self.lower_splitter.setStretchFactor(1, 1)
-        self.lower_splitter.setSizes([180, 90])
-
-        self.content_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.content_splitter = QWidget()
         self.content_splitter.setObjectName("contentSplitter")
-        self.content_splitter.setChildrenCollapsible(False)
-        self.content_splitter.addWidget(self.top_splitter)
-        self.content_splitter.addWidget(self.lower_splitter)
-        self.content_splitter.setStretchFactor(0, 7)
-        self.content_splitter.setStretchFactor(1, 3)
-        self.content_splitter.setSizes([560, 160])
+        content_layout = QVBoxLayout(self.content_splitter)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(16)
+        content_layout.addWidget(self.top_splitter, 6)
+        content_layout.addWidget(self.task_card, 3)
+        content_layout.addWidget(self.log_card, 2)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 18, 20, 18)
@@ -348,7 +348,7 @@ class MainWindow(QWidget):
                 font-weight: 600;
             }
             QPushButton {
-                min-height: 36px;
+                min-height: 32px;
                 border-radius: 10px;
                 border: 1px solid #cbd5e1;
                 background: #f8fafc;

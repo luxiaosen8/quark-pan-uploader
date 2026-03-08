@@ -68,3 +68,5 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 - 主界面采用“顶部摘要 + 中区双栏 + 任务区 + 底部日志”的专业桌面工具布局
 - `main_window.py` 中保留原有业务控件实例，主要通过卡片式容器和样式表增强表现层
 - `controller.py` 只做小范围视图联动，例如当前选中远端目录摘要
+
+- 操作区默认窗口高度下应尽量完整可见，优先避免滚动条与控件挤占；仅在极端窗口高度或 DPI 缩放下回退到滚动承接

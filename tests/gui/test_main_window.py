@@ -22,3 +22,13 @@ def test_main_window_exposes_professional_layout_sections(qtbot):
     assert window.window_title_label.text() == "夸克网盘批量上传分享工具"
     assert window.controls_card.minimumWidth() >= 420
     assert window.content_splitter.objectName() == "contentSplitter"
+
+
+def test_controls_panel_does_not_need_scrollbar_at_default_size(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.wait(50)
+
+    assert window.controls_scroll.verticalScrollBar().maximum() == 0
