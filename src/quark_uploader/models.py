@@ -16,12 +16,23 @@ class FolderTaskStatus(str, Enum):
     STOPPED = "stopped"
 
 
+class TaskSourceType(str, Enum):
+    FOLDER = "folder"
+    FILE = "file"
+
+
+class UploadMode(str, Enum):
+    BATCH_SUBFOLDERS = "batch_subfolders"
+    SINGLE_TARGET = "single_target"
+
+
 class FolderTask(BaseModel):
     local_name: str
     local_path: str
     file_count: int = 0
     total_size: int = 0
     status: FolderTaskStatus = FolderTaskStatus.PENDING
+    source_type: TaskSourceType = TaskSourceType.FOLDER
     share_url: str | None = None
     remote_folder_fid: str | None = None
     error_message: str | None = None

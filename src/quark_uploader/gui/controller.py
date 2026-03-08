@@ -8,12 +8,12 @@ from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 
 from quark_uploader.gui.main_window import MainWindow
 from quark_uploader.gui.workers import UploadWorker, UploadWorkerHandle
-from quark_uploader.models import FolderTaskStatus
+from quark_uploader.models import FolderTaskStatus, UploadMode
 from quark_uploader.paths import resolve_runtime_path
 from quark_uploader.services.cancellation import UploadCancellationToken
 from quark_uploader.services.invoke import call_with_supported_kwargs, call_with_supported_positional_args
 from quark_uploader.services.remote_cleanup_service import RemoteCleanupService
-from quark_uploader.services.scanner import EMPTY_FOLDER_MESSAGE, scan_first_level_subfolders
+from quark_uploader.services.scanner import EMPTY_FOLDER_MESSAGE, build_single_target_task, scan_first_level_subfolders
 from quark_uploader.services.upload_workflow import build_upload_plan
 from quark_uploader.settings import AppSettings
 
@@ -44,15 +44,19 @@ class MainWindowController:
         self.current_folder_tasks = []
         self.current_upload_plan = None
         self.current_settings = AppSettings()
+        self.current_upload_mode = UploadMode.BATCH_SUBFOLDERS
 
         self.window.refresh_button.clicked.connect(self.refresh_drive)
         self.window.official_login_button.clicked.connect(self.open_official_login)
         self.window.select_local_folder_button.clicked.connect(self.browse_local_root)
+        self.window.select_single_folder_button.clicked.connect(self.browse_single_target_folder)
+        self.window.select_single_file_button.clicked.connect(self.browse_single_target_file)
         self.window.open_output_button.clicked.connect(self.open_output_directory)
         self.window.start_button.clicked.connect(self.start_upload)
         self.window.stop_button.clicked.connect(self.stop_upload)
         self.window.stop_button.setEnabled(False)
         self.window.remote_tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
+        self.window.upload_mode_batch_radio.toggled.connect(self._on_upload_mode_radio_toggled)
         self._load_settings()
         self.window.remote_tree.itemExpanded.connect(self.on_tree_item_expanded)
 
@@ -64,6 +68,7 @@ class MainWindowController:
         self.window.remember_cookie_checkbox.setChecked(self.current_settings.save_cookie)
         if self.current_settings.persisted_cookie:
             self.window.cookie_input.setText(self.current_settings.persisted_cookie)
+        self.window.set_upload_mode(self.current_upload_mode.value)
 
     def _persist_settings(self) -> None:
         if self.settings_store is None:
@@ -78,10 +83,41 @@ class MainWindowController:
     def _output_dir(self) -> Path:
         return resolve_runtime_path(self.current_settings.output_dir)
 
+    def _clear_local_selection(self) -> None:
+        self.current_folder_tasks = []
+        self.current_upload_plan = None
+        self.window.local_root = ""
+        self.window.local_root_label.setText("本地来源：未选择")
+        self.window.task_table.setRowCount(0)
+        self.window.set_progress_summary(completed=0, total=0, failed=0)
+        self.window.recompute_start_enabled()
+
+    def _set_upload_mode(self, mode: UploadMode) -> None:
+        if self.current_upload_mode is mode:
+            self.window.set_upload_mode(mode.value)
+            return
+        self.current_upload_mode = mode
+        self.window.set_upload_mode(mode.value)
+        self._clear_local_selection()
+
+    def _on_upload_mode_radio_toggled(self, checked: bool) -> None:
+        mode = UploadMode.BATCH_SUBFOLDERS if checked else UploadMode.SINGLE_TARGET
+        self._set_upload_mode(mode)
+
     def browse_local_root(self) -> None:
         path = QFileDialog.getExistingDirectory(self.window, "选择本地文件夹")
         if path:
             self.apply_local_root(path)
+
+    def browse_single_target_folder(self) -> None:
+        path = QFileDialog.getExistingDirectory(self.window, "选择单个文件夹")
+        if path:
+            self.apply_single_target(path)
+
+    def browse_single_target_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self.window, "选择单个文件")
+        if path:
+            self.apply_single_target(path)
 
     def open_output_directory(self) -> None:
         output_dir = self._output_dir()
@@ -114,6 +150,18 @@ class MainWindowController:
                 self.window.append_log(f"[INFO] 跳过空目录：{task.local_name}")
         if skipped_count:
             self.window.append_log(f"[INFO] 已跳过 {skipped_count} 个空目录")
+
+    def apply_single_target(self, path: str) -> None:
+        task = build_single_target_task(Path(path))
+        self.current_folder_tasks = [task]
+        self.window.set_local_root(path)
+        self.window.populate_task_table([task])
+        total = 1 if task.can_execute else 0
+        self.window.set_progress_summary(completed=0, total=total, failed=0)
+        self.window.set_current_action("当前动作：等待上传")
+        self.window.append_log(f"[INFO] 已选择单目标上传源：{task.local_name}")
+        if task.status is FolderTaskStatus.SKIPPED and task.error_message == EMPTY_FOLDER_MESSAGE:
+            self.window.append_log(f"[INFO] 跳过空目录：{task.local_name}")
 
     def refresh_drive(self) -> None:
         cookie = self.window.cookie_input.text().strip()
@@ -243,7 +291,8 @@ class MainWindowController:
     def start_upload(self) -> None:
         executable_count = sum(1 for task in self.current_folder_tasks if task.can_execute)
         if executable_count == 0:
-            self.window.append_log("[WARN] 当前没有可上传的子文件夹")
+            warn_message = "[WARN] 当前没有可上传的子文件夹" if self.current_upload_mode is UploadMode.BATCH_SUBFOLDERS else "[WARN] 当前没有可上传的单目标"
+            self.window.append_log(warn_message)
             return
         if not self.window.remote_folder_id:
             self.window.append_log("[WARN] 请先选择网盘目标目录")
@@ -251,14 +300,20 @@ class MainWindowController:
         self.current_upload_plan = build_upload_plan(self.window.remote_folder_id, self.current_folder_tasks)
         total = len(self.current_upload_plan.jobs)
         if total == 0:
-            self.window.append_log("[WARN] 当前没有可上传的子文件夹")
+            warn_message = "[WARN] 当前没有可上传的子文件夹" if self.current_upload_mode is UploadMode.BATCH_SUBFOLDERS else "[WARN] 当前没有可上传的单目标"
+            self.window.append_log(warn_message)
             return
         for job in self.current_upload_plan.jobs:
             self.window.update_task_status(job.local_name, FolderTaskStatus.UPLOADING.value)
         self.window.set_progress_summary(completed=0, total=total, failed=0)
-        self.window.append_log(
-            f"[INFO] 已创建上传计划，共 {len(self.current_upload_plan.jobs)} 个子文件夹任务"
-        )
+        if self.current_upload_mode is UploadMode.BATCH_SUBFOLDERS:
+            self.window.append_log(
+                f"[INFO] 已创建上传计划，共 {len(self.current_upload_plan.jobs)} 个子文件夹任务"
+            )
+        else:
+            self.window.append_log(
+                f"[INFO] 已创建上传计划，共 {len(self.current_upload_plan.jobs)} 个单目标任务"
+            )
         self.window.start_button.setEnabled(False)
         self.window.stop_button.setEnabled(True)
         if self.upload_executor_factory is None:

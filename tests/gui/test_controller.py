@@ -209,3 +209,24 @@ def test_controller_updates_selected_remote_path_summary(qtbot):
     controller.on_tree_selection_changed()
 
     assert window.selected_remote_label.text() == "当前选择：资料 / 子目录"
+
+
+def test_controller_mode_switch_clears_selected_source_state(qtbot, tmp_path):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    source_dir = tmp_path / "批量目录"
+    source_dir.mkdir()
+    (source_dir / "课程A").mkdir()
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success: FakeLoginDialog(None),
+    )
+
+    controller.apply_local_root(str(source_dir))
+    window.upload_mode_single_radio.click()
+
+    assert window.local_root == ""
+    assert window.task_table.rowCount() == 0

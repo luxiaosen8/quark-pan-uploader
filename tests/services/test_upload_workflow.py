@@ -1,4 +1,4 @@
-from quark_uploader.models import FolderTask, FolderTaskStatus
+from quark_uploader.models import FolderTask, FolderTaskStatus, TaskSourceType
 from quark_uploader.services.file_manifest import LocalFileEntry
 from quark_uploader.services.remote_folder_plan import RemoteFolderRequirement
 from quark_uploader.services.upload_workflow import UploadExecutionPlan, UploadJob, build_upload_plan
@@ -48,3 +48,18 @@ def test_build_upload_plan_excludes_skipped_or_empty_tasks():
     )
 
     assert [job.local_name for job in plan.jobs] == ["课程A"]
+
+
+def test_build_upload_plan_supports_single_file_task_without_remote_dirs(tmp_path):
+    file_path = tmp_path / "cover.txt"
+    file_path.write_text("12", encoding="utf-8")
+
+    plan = build_upload_plan(
+        remote_parent_fid="remote-root",
+        tasks=[FolderTask(local_name="cover.txt", local_path=str(file_path), file_count=1, total_size=2, source_type=TaskSourceType.FILE)],
+    )
+
+    job = plan.jobs[0]
+    assert job.source_type is TaskSourceType.FILE
+    assert job.remote_dir_requirements == []
+    assert job.file_entries[0].relative_path == "cover.txt"

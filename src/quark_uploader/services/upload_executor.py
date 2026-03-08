@@ -6,7 +6,7 @@ from time import sleep
 
 from pydantic import BaseModel
 
-from quark_uploader.models import FolderTaskStatus
+from quark_uploader.models import FolderTaskStatus, TaskSourceType
 from quark_uploader.services.cancellation import UploadCancellationToken, UploadCancelled
 from quark_uploader.services.invoke import call_with_supported_kwargs
 from quark_uploader.services.remote_directory_sync import ResolvedRemoteDirectory
@@ -15,6 +15,8 @@ from quark_uploader.services.upload_workflow import UploadJob
 
 class UploadExecutionResult(BaseModel):
     root_folder_fid: str
+    remote_item_fid: str = ""
+    remote_item_type: str = TaskSourceType.FOLDER.value
     uploaded_files: int = 0
     share_url: str = ""
     share_id: str = ""
@@ -66,14 +68,20 @@ class UploadExecutionEngine:
         retry_count = 0
         uploaded_files = 0
         root_folder_fid = ""
+        remote_item_fid = ""
         self._append_event("INFO", "job", "job start", folder_name=job.local_name, total_files=len(job.file_entries))
         if status_callback is not None:
             status_callback(FolderTaskStatus.UPLOADING.value, retry_count=retry_count)
         try:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            resolved = self.directory_sync_service.ensure_job_directories(job)
-            root_folder_fid = resolved.root_folder_fid
+            if job.source_type is TaskSourceType.FILE:
+                resolved = ResolvedRemoteDirectory(root_folder_fid=job.remote_parent_fid)
+                root_folder_fid = job.remote_parent_fid
+            else:
+                resolved = self.directory_sync_service.ensure_job_directories(job)
+                root_folder_fid = resolved.root_folder_fid
+                remote_item_fid = root_folder_fid
 
             for entry in job.file_entries:
                 parent_fid = self._resolve_target_parent_fid(entry.relative_path, resolved)
@@ -82,7 +90,7 @@ class UploadExecutionEngine:
                     if cancel_token is not None:
                         cancel_token.raise_if_cancelled()
                     try:
-                        call_with_supported_kwargs(
+                        upload_result = call_with_supported_kwargs(
                             self.uploader.upload_file,
                             entry,
                             parent_fid,
@@ -90,6 +98,8 @@ class UploadExecutionEngine:
                             progress_callback=progress_callback,
                         )
                         uploaded_files += 1
+                        if job.source_type is TaskSourceType.FILE:
+                            remote_item_fid = str(upload_result.get("finish", {}).get("data", {}).get("fid", ""))
                         if status_callback is not None:
                             status_callback(FolderTaskStatus.UPLOADING.value, retry_count=retry_count)
                         break
@@ -116,9 +126,11 @@ class UploadExecutionEngine:
                     if cancel_token is not None:
                         cancel_token.raise_if_cancelled()
                     try:
+                        share_target_fid = remote_item_fid or resolved.root_folder_fid
+                        share_callable = self.share_service.create_share_for_item if job.source_type is TaskSourceType.FILE else self.share_service.create_share_for_folder
                         share_result = call_with_supported_kwargs(
-                            self.share_service.create_share_for_folder,
-                            fid=resolved.root_folder_fid,
+                            share_callable,
+                            fid=share_target_fid,
                             title=job.local_name,
                             cancel_token=cancel_token,
                         )
@@ -142,6 +154,8 @@ class UploadExecutionEngine:
 
             result = UploadExecutionResult(
                 root_folder_fid=root_folder_fid,
+                remote_item_fid=remote_item_fid or root_folder_fid,
+                remote_item_type=job.source_type.value,
                 uploaded_files=uploaded_files,
                 share_id=share_id,
                 share_url=share_url,
@@ -156,6 +170,8 @@ class UploadExecutionEngine:
         except UploadCancelled as exc:
             result = UploadExecutionResult(
                 root_folder_fid=root_folder_fid,
+                remote_item_fid=remote_item_fid or root_folder_fid,
+                remote_item_type=job.source_type.value,
                 uploaded_files=uploaded_files,
                 retry_count=retry_count,
                 status=FolderTaskStatus.STOPPED.value,
@@ -169,6 +185,8 @@ class UploadExecutionEngine:
         except Exception as exc:
             result = UploadExecutionResult(
                 root_folder_fid=root_folder_fid,
+                remote_item_fid=remote_item_fid or root_folder_fid,
+                remote_item_type=job.source_type.value,
                 uploaded_files=uploaded_files,
                 retry_count=retry_count + 1,
                 status=FolderTaskStatus.FAILED.value,
@@ -191,6 +209,8 @@ class UploadExecutionEngine:
             "remote_parent_fid": job.remote_parent_fid,
             "remote_folder_fid": result.root_folder_fid,
             "remote_root_fid": result.root_folder_fid,
+            "remote_item_fid": result.remote_item_fid,
+            "remote_item_type": result.remote_item_type,
             "total_files": len(job.file_entries),
             "uploaded_files": result.uploaded_files,
             "share_id": result.share_id,

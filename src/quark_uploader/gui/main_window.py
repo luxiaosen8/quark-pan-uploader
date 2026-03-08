@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QRadioButton,
     QPushButton,
     QProgressBar,
     QScrollArea,
@@ -23,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from quark_uploader.models import AccountSummary, FolderTask, RemoteFolderNode
+from quark_uploader.models import AccountSummary, FolderTask, RemoteFolderNode, UploadMode
 from quark_uploader.paths import get_icon_path
 
 
@@ -41,10 +42,12 @@ class MainWindow(QWidget):
         self.remember_cookie_checkbox.setChecked(True)
         self.refresh_button = QPushButton("刷新网盘")
         self.select_local_folder_button = QPushButton("选择本地文件夹")
+        self.select_single_folder_button = QPushButton("选择单个文件夹")
+        self.select_single_file_button = QPushButton("选择单个文件")
         self.open_output_button = QPushButton("打开输出目录")
         self.status_label = QLabel("未连接")
         self.account_label = QLabel("账号：未加载")
-        self.local_root_label = QLabel("本地目录：未选择")
+        self.local_root_label = QLabel("本地来源：未选择")
         self.progress_summary_label = QLabel("任务进度：0/0，失败 0")
         self.current_action_label = QLabel("当前动作：空闲")
         self.overall_progress_bar = QProgressBar()
@@ -55,7 +58,7 @@ class MainWindow(QWidget):
         self.remote_tree = QTreeWidget()
         self.remote_tree.setHeaderLabels(["网盘目录", "FID"])
         self.task_table = QTableWidget(0, 6)
-        self.task_table.setHorizontalHeaderLabels(["子文件夹", "文件数", "总大小", "状态", "分享链接", "重试"])
+        self.task_table.setHorizontalHeaderLabels(["任务名称", "文件数", "总大小", "状态", "分享链接", "重试"])
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.start_button.setEnabled(False)
@@ -65,6 +68,9 @@ class MainWindow(QWidget):
         self.summary_hint_label = QLabel("连接账号、选择目录并执行任务")
         self.summary_hint_label.setObjectName("sectionSubtitle")
         self.selected_remote_label = QLabel("当前选择：未选择")
+        self.upload_mode_batch_radio = QRadioButton("批量子文件夹")
+        self.upload_mode_single_radio = QRadioButton("单文件/单文件夹")
+        self.upload_mode_batch_radio.setChecked(True)
         self.selected_remote_label.setObjectName("selectedRemoteLabel")
 
         self.summary_card, self.summary_layout, self.summary_card_title = self._create_card(
@@ -89,7 +95,7 @@ class MainWindow(QWidget):
         self.controls_body = QWidget()
         self.controls_body_layout = QVBoxLayout(self.controls_body)
         self.controls_body_layout.setContentsMargins(0, 0, 0, 0)
-        self.controls_body_layout.setSpacing(6)
+        self.controls_body_layout.setSpacing(4)
         self.controls_scroll.setWidget(self.controls_body)
 
         self.summary_card_title.hide()
@@ -99,6 +105,7 @@ class MainWindow(QWidget):
         self._configure_widgets()
         self._build_layout()
         self._apply_styles()
+        self.set_upload_mode(UploadMode.BATCH_SUBFOLDERS.value)
 
         self.setWindowTitle("夸克网盘批量上传分享工具")
         icon_path = get_icon_path()
@@ -140,6 +147,8 @@ class MainWindow(QWidget):
         self.refresh_button.setObjectName("secondaryButton")
         self.official_login_button.setObjectName("secondaryButton")
         self.select_local_folder_button.setObjectName("secondaryButton")
+        self.select_single_folder_button.setObjectName("secondaryButton")
+        self.select_single_file_button.setObjectName("secondaryButton")
         self.open_output_button.setObjectName("secondaryButton")
 
         self.cookie_input.setClearButtonEnabled(True)
@@ -203,10 +212,17 @@ class MainWindow(QWidget):
         self.controls_layout.itemAt(1).widget().hide()
         self.controls_layout.addWidget(self.controls_scroll, 1)
 
+        upload_mode_row = QHBoxLayout()
+        upload_mode_row.setSpacing(10)
+        upload_mode_row.addWidget(self.upload_mode_batch_radio)
+        upload_mode_row.addWidget(self.upload_mode_single_radio)
+        upload_mode_row.addStretch(1)
+        self.controls_body_layout.addLayout(upload_mode_row)
+
         self.controls_body_layout.addWidget(self._create_subsection_label("账号连接"))
         self.controls_body_layout.addWidget(self.cookie_input)
         auth_button_row = QHBoxLayout()
-        auth_button_row.setSpacing(10)
+        auth_button_row.setSpacing(8)
         auth_button_row.addWidget(self.official_login_button)
         auth_button_row.addWidget(self.refresh_button)
         self.controls_body_layout.addLayout(auth_button_row)
@@ -215,14 +231,20 @@ class MainWindow(QWidget):
         self.controls_body_layout.addSpacing(2)
         self.controls_body_layout.addWidget(self.local_root_label)
         local_button_row = QHBoxLayout()
-        local_button_row.setSpacing(10)
+        local_button_row.setSpacing(8)
         local_button_row.addWidget(self.select_local_folder_button)
         local_button_row.addWidget(self.open_output_button)
         self.controls_body_layout.addLayout(local_button_row)
 
+        self.single_target_button_row = QHBoxLayout()
+        self.single_target_button_row.setSpacing(10)
+        self.single_target_button_row.addWidget(self.select_single_folder_button)
+        self.single_target_button_row.addWidget(self.select_single_file_button)
+        self.controls_body_layout.addLayout(self.single_target_button_row)
+
         self.controls_body_layout.addSpacing(2)
         action_button_row = QHBoxLayout()
-        action_button_row.setSpacing(10)
+        action_button_row.setSpacing(8)
         action_button_row.addWidget(self.start_button, 1)
         action_button_row.addWidget(self.stop_button, 1)
         self.controls_body_layout.addLayout(action_button_row)
@@ -361,11 +383,11 @@ class MainWindow(QWidget):
                 font-weight: 600;
             }
             QPushButton {
-                min-height: 30px;
+                min-height: 28px;
                 border-radius: 10px;
                 border: 1px solid #cbd5e1;
                 background: #f8fafc;
-                padding: 5px 12px;
+                padding: 4px 10px;
                 font-weight: 600;
             }
             QPushButton:hover {
@@ -406,8 +428,9 @@ class MainWindow(QWidget):
                 border-radius: 9px;
                 background: #2563eb;
             }
-            QCheckBox {
+            QCheckBox, QRadioButton {
                 color: #334155;
+                font-size: 12px;
             }
         ''')
 
@@ -422,7 +445,7 @@ class MainWindow(QWidget):
 
     def set_local_root(self, path: str) -> None:
         self.local_root = path
-        self.local_root_label.setText(f"本地目录：{path}")
+        self.local_root_label.setText(f"本地来源：{path}")
         self.recompute_start_enabled()
 
     def set_progress_summary(self, completed: int, total: int, failed: int) -> None:
@@ -434,6 +457,14 @@ class MainWindow(QWidget):
 
     def set_selected_remote_folder(self, path: str | None) -> None:
         self.selected_remote_label.setText(f"当前选择：{path}" if path else "当前选择：未选择")
+
+    def set_upload_mode(self, mode: str) -> None:
+        is_batch = mode == UploadMode.BATCH_SUBFOLDERS.value
+        self.upload_mode_batch_radio.setChecked(is_batch)
+        self.upload_mode_single_radio.setChecked(not is_batch)
+        self.select_local_folder_button.setVisible(is_batch)
+        self.select_single_folder_button.setVisible(not is_batch)
+        self.select_single_file_button.setVisible(not is_batch)
 
     def _update_status_chip_style(self, state: str) -> None:
         self.status_label.setProperty("state", state)

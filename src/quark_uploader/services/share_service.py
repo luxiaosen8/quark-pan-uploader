@@ -37,7 +37,7 @@ class QuarkShareService:
         if self.logger is not None:
             self.logger(message)
 
-    def create_share_for_folder(self, fid: str, title: str, cancel_token: UploadCancellationToken | None = None) -> ShareCreationResult:
+    def create_share_for_item(self, fid: str, title: str, cancel_token: UploadCancellationToken | None = None) -> ShareCreationResult:
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
         self._log(f"[DEBUG] 开始创建分享：title={title} fid={fid}")
@@ -71,3 +71,6 @@ class QuarkShareService:
             self.result_writer.append_share_url(share_url)
             self._log(f"[DEBUG] 分享链接已写入：share_url={mask_share_url(share_url)}")
         return result
+
+    def create_share_for_folder(self, fid: str, title: str, cancel_token: UploadCancellationToken | None = None) -> ShareCreationResult:
+        return self.create_share_for_item(fid=fid, title=title, cancel_token=cancel_token)

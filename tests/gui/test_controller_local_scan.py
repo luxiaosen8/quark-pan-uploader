@@ -302,3 +302,57 @@ def test_controller_marks_empty_folder_skipped_and_excludes_it_from_upload_plan(
     assert controller.current_upload_plan is not None
     assert [job.local_name for job in controller.current_upload_plan.jobs] == ["课程A"]
     assert "跳过空目录：空目录" in window.log_output.toPlainText()
+
+
+def test_controller_single_target_folder_creates_one_directory_task(qtbot, tmp_path: Path):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    lesson = tmp_path / "课程单目录"
+    nested = lesson / "chapter1"
+    nested.mkdir(parents=True)
+    (nested / "video.mp4").write_text("1234", encoding="utf-8")
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success: FakeLoginDialog(),
+    )
+    window.cookie_valid = True
+    window.remote_folder_id = "folder-1"
+    window.set_upload_mode("single_target")
+
+    controller.apply_single_target(str(lesson))
+    controller.start_upload()
+
+    assert controller.current_upload_plan is not None
+    job = controller.current_upload_plan.jobs[0]
+    assert job.source_type.value == "folder"
+    assert job.local_name == "课程单目录"
+    assert job.remote_dir_requirements[0].relative_dir == "chapter1"
+
+
+def test_controller_single_target_file_creates_one_file_task(qtbot, tmp_path: Path):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    file_path = tmp_path / "cover.txt"
+    file_path.write_text("12", encoding="utf-8")
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: FakeRefreshService(),
+        login_dialog_factory=lambda on_success: FakeLoginDialog(),
+    )
+    window.cookie_valid = True
+    window.remote_folder_id = "folder-1"
+    window.set_upload_mode("single_target")
+
+    controller.apply_single_target(str(file_path))
+    controller.start_upload()
+
+    assert controller.current_upload_plan is not None
+    job = controller.current_upload_plan.jobs[0]
+    assert job.source_type.value == "file"
+    assert job.file_entries[0].relative_path == "cover.txt"
+    assert job.remote_dir_requirements == []

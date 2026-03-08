@@ -2,6 +2,7 @@ from pathlib import Path
 import csv
 import json
 
+from quark_uploader.models import TaskSourceType
 from quark_uploader.services.file_manifest import LocalFileEntry
 from quark_uploader.services.remote_directory_sync import ResolvedRemoteDirectory
 from quark_uploader.services.remote_folder_plan import RemoteFolderRequirement
@@ -224,3 +225,55 @@ def test_upload_execution_engine_uses_backoff_before_retry():
     engine.execute_job(build_job())
 
     assert delays == [0.25]
+
+
+
+class SingleFileUploader:
+    def __init__(self):
+        self.calls = []
+
+    def upload_file(self, file_entry, target_parent_fid: str, cancel_token=None, progress_callback=None):
+        self.calls.append((file_entry.relative_path, target_parent_fid))
+        return {"finish": {"data": {"fid": "file-fid-1"}}}
+
+
+class RecordingShareService:
+    def __init__(self):
+        self.calls = []
+
+    def create_share_for_item(self, fid: str, title: str, cancel_token=None):
+        self.calls.append((fid, title))
+        return type("ShareResult", (), {"share_id": "share-file-1", "share_url": "https://pan.quark.cn/s/file123"})()
+
+
+def build_file_job():
+    return UploadJob(
+        local_name="cover.txt",
+        local_path="C:/cover.txt",
+        file_count=1,
+        total_size=5,
+        remote_parent_fid="remote-root",
+        source_type=TaskSourceType.FILE,
+        file_entries=[LocalFileEntry(local_name="cover.txt", absolute_path="C:/cover.txt", relative_path="cover.txt", size_bytes=5)],
+        remote_dir_requirements=[],
+    )
+
+
+def test_upload_execution_engine_supports_single_file_task_and_shares_file(tmp_path: Path):
+    writer = ResultWriter(tmp_path, run_id="run-file")
+    uploader = SingleFileUploader()
+    share_service = RecordingShareService()
+    engine = UploadExecutionEngine(
+        directory_sync_service=FakeDirectorySyncService(),
+        uploader=uploader,
+        share_service=share_service,
+        result_writer=writer,
+    )
+
+    result = engine.execute_job(build_file_job())
+
+    assert uploader.calls == [("cover.txt", "remote-root")]
+    assert share_service.calls == [("file-fid-1", "cover.txt")]
+    assert result.share_url == "https://pan.quark.cn/s/file123"
+    rows = (tmp_path / "runs" / "run-file" / "share_results.jsonl").read_text(encoding="utf-8").splitlines()
+    assert any('"remote_item_type": "file"' in row for row in rows)

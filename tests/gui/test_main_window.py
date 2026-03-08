@@ -42,3 +42,15 @@ def test_main_window_uses_plain_text_log_panel(qtbot):
 
     assert isinstance(window.log_output, QPlainTextEdit)
     assert window.log_output.maximumBlockCount() == 1000
+
+
+def test_main_window_exposes_upload_mode_switch_and_single_target_buttons(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.upload_mode_batch_radio.text() == "批量子文件夹"
+    assert window.upload_mode_single_radio.text() == "单文件/单文件夹"
+    assert window.select_single_folder_button.text() == "选择单个文件夹"
+    assert window.select_single_file_button.text() == "选择单个文件"
+    assert window.upload_mode_batch_radio.isChecked() is True
