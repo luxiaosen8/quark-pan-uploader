@@ -70,3 +70,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 - `controller.py` 只做小范围视图联动，例如当前选中远端目录摘要
 
 - 操作区默认窗口高度下应尽量完整可见，优先避免滚动条与控件挤占；仅在极端窗口高度或 DPI 缩放下回退到滚动承接
+
+## 性能与日志 UI
+
+- 登录页 Cookie 校验采用异步执行，避免在 UI 线程中同步网络校验导致卡顿
+- 主页面日志区使用 `QPlainTextEdit` 作为纯文本日志面板，并限制最大日志块数以改善性能
+- 主页面中下区域使用更均衡的工作区布局，保证任务表格和日志区都具备基本可读性

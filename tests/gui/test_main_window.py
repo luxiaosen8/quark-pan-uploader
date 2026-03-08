@@ -1,3 +1,4 @@
+from PySide6.QtWidgets import QPlainTextEdit
 from quark_uploader.app import create_app
 from quark_uploader.gui.main_window import MainWindow
 
@@ -32,3 +33,12 @@ def test_controls_panel_does_not_need_scrollbar_at_default_size(qtbot):
     qtbot.wait(50)
 
     assert window.controls_scroll.verticalScrollBar().maximum() == 0
+
+
+def test_main_window_uses_plain_text_log_panel(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert isinstance(window.log_output, QPlainTextEdit)
+    assert window.log_output.maximumBlockCount() == 1000

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
-    QTextEdit,
+    QPlainTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -56,13 +56,13 @@ class MainWindow(QWidget):
         self.remote_tree.setHeaderLabels(["网盘目录", "FID"])
         self.task_table = QTableWidget(0, 6)
         self.task_table.setHorizontalHeaderLabels(["子文件夹", "文件数", "总大小", "状态", "分享链接", "重试"])
-        self.log_output = QTextEdit()
+        self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.start_button.setEnabled(False)
 
         self.window_title_label = QLabel("夸克网盘批量上传分享工具")
         self.window_title_label.setObjectName("windowTitleLabel")
-        self.summary_hint_label = QLabel("连接账号、选择目录并批量执行上传与分享任务")
+        self.summary_hint_label = QLabel("连接账号、选择目录并执行任务")
         self.summary_hint_label.setObjectName("sectionSubtitle")
         self.selected_remote_label = QLabel("当前选择：未选择")
         self.selected_remote_label.setObjectName("selectedRemoteLabel")
@@ -89,7 +89,7 @@ class MainWindow(QWidget):
         self.controls_body = QWidget()
         self.controls_body_layout = QVBoxLayout(self.controls_body)
         self.controls_body_layout.setContentsMargins(0, 0, 0, 0)
-        self.controls_body_layout.setSpacing(8)
+        self.controls_body_layout.setSpacing(6)
         self.controls_scroll.setWidget(self.controls_body)
 
         self.summary_card_title.hide()
@@ -110,7 +110,7 @@ class MainWindow(QWidget):
         card.setObjectName(object_name)
         card.setProperty("card", True)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
         title_label = QLabel(title)
@@ -143,7 +143,7 @@ class MainWindow(QWidget):
         self.open_output_button.setObjectName("secondaryButton")
 
         self.cookie_input.setClearButtonEnabled(True)
-        self.cookie_input.setMinimumHeight(34)
+        self.cookie_input.setMinimumHeight(32)
 
         self.remote_tree.setAlternatingRowColors(True)
         self.remote_tree.setMinimumHeight(260)
@@ -155,7 +155,7 @@ class MainWindow(QWidget):
         self.task_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.task_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.task_table.verticalHeader().setVisible(False)
-        self.task_table.setMinimumHeight(140)
+        self.task_table.setMinimumHeight(150)
         header = self.task_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -168,11 +168,17 @@ class MainWindow(QWidget):
         self.controls_card.setMinimumWidth(430)
         self.remote_card.setMinimumWidth(520)
         self.remote_tree.setMinimumHeight(220)
-        self.task_card.setMaximumHeight(120)
-        self.log_card.setMaximumHeight(90)
-        self.log_output.setMinimumHeight(90)
+        self.log_output.setMinimumHeight(140)
+        self.log_output.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.log_output.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.log_output.setMaximumBlockCount(1000)
+        self.log_output.setCenterOnScroll(False)
+        self.log_output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log_output.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.log_output.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.remote_tree.setUniformRowHeights(True)
+        self.task_table.setWordWrap(False)
+        self.task_table.verticalHeader().setDefaultSectionSize(32)
 
     def _build_layout(self) -> None:
         summary_top_row = QHBoxLayout()
@@ -181,6 +187,7 @@ class MainWindow(QWidget):
         title_column.setSpacing(4)
         title_column.addWidget(self.window_title_label)
         title_column.addWidget(self.summary_hint_label)
+        self.summary_hint_label.hide()
         summary_top_row.addLayout(title_column, 1)
         summary_top_row.addWidget(self.status_label, 0, Qt.AlignmentFlag.AlignTop)
         self.summary_layout.addLayout(summary_top_row)
@@ -206,7 +213,6 @@ class MainWindow(QWidget):
         self.controls_body_layout.addWidget(self.remember_cookie_checkbox)
 
         self.controls_body_layout.addSpacing(2)
-        self.controls_body_layout.addWidget(self._create_subsection_label("本地与输出"))
         self.controls_body_layout.addWidget(self.local_root_label)
         local_button_row = QHBoxLayout()
         local_button_row.setSpacing(10)
@@ -215,7 +221,6 @@ class MainWindow(QWidget):
         self.controls_body_layout.addLayout(local_button_row)
 
         self.controls_body_layout.addSpacing(2)
-        self.controls_body_layout.addWidget(self._create_subsection_label("任务控制"))
         action_button_row = QHBoxLayout()
         action_button_row.setSpacing(10)
         action_button_row.addWidget(self.start_button, 1)
@@ -238,18 +243,26 @@ class MainWindow(QWidget):
         self.top_splitter.setSizes([430, 820])
         self.top_splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
+        self.workbench_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.workbench_splitter.setObjectName("workbenchSplitter")
+        self.workbench_splitter.setChildrenCollapsible(False)
+        self.workbench_splitter.addWidget(self.task_card)
+        self.workbench_splitter.addWidget(self.log_card)
+        self.workbench_splitter.setStretchFactor(0, 3)
+        self.workbench_splitter.setStretchFactor(1, 2)
+        self.workbench_splitter.setSizes([190, 150])
+
         self.content_splitter = QWidget()
         self.content_splitter.setObjectName("contentSplitter")
         content_layout = QVBoxLayout(self.content_splitter)
         content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(16)
+        content_layout.setSpacing(14)
         content_layout.addWidget(self.top_splitter, 6)
-        content_layout.addWidget(self.task_card, 3)
-        content_layout.addWidget(self.log_card, 2)
+        content_layout.addWidget(self.workbench_splitter, 3)
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(16)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(14)
         layout.addWidget(self.summary_card)
         layout.addWidget(self.content_splitter, 1)
         self.setLayout(layout)
@@ -271,18 +284,18 @@ class MainWindow(QWidget):
                 border-radius: 14px;
             }
             QLabel#windowTitleLabel {
-                font-size: 24px;
+                font-size: 20px;
                 font-weight: 700;
                 color: #0f172a;
             }
             QLabel#sectionTitle {
-                font-size: 16px;
+                font-size: 15px;
                 font-weight: 700;
                 color: #0f172a;
             }
             QLabel#sectionSubtitle {
                 color: #64748b;
-                font-size: 12px;
+                font-size: 11px;
             }
             QLabel#subsectionLabel {
                 color: #334155;
@@ -328,13 +341,13 @@ class MainWindow(QWidget):
                 color: #b91c1c;
                 border: 1px solid #fca5a5;
             }
-            QLineEdit, QTreeWidget, QTableWidget, QTextEdit {
+            QLineEdit, QTreeWidget, QTableWidget, QPlainTextEdit {
                 background: #fbfdff;
                 border: 1px solid #cfd8e3;
                 border-radius: 10px;
                 padding: 6px 8px;
             }
-            QTreeWidget, QTableWidget, QTextEdit {
+            QTreeWidget, QTableWidget, QPlainTextEdit {
                 gridline-color: #e2e8f0;
                 selection-background-color: #dbeafe;
                 selection-color: #0f172a;
@@ -348,11 +361,11 @@ class MainWindow(QWidget):
                 font-weight: 600;
             }
             QPushButton {
-                min-height: 32px;
+                min-height: 30px;
                 border-radius: 10px;
                 border: 1px solid #cbd5e1;
                 background: #f8fafc;
-                padding: 6px 14px;
+                padding: 5px 12px;
                 font-weight: 600;
             }
             QPushButton:hover {
@@ -497,4 +510,4 @@ class MainWindow(QWidget):
             self.remote_tree.addTopLevelItem(item)
 
     def append_log(self, message: str) -> None:
-        self.log_output.append(message)
+        self.log_output.appendPlainText(message)
