@@ -20,3 +20,5 @@ def test_main_window_exposes_professional_layout_sections(qtbot):
     assert window.task_card.objectName() == "taskCard"
     assert window.log_card.objectName() == "logCard"
     assert window.window_title_label.text() == "夸克网盘批量上传分享工具"
+    assert window.controls_card.minimumWidth() >= 420
+    assert window.content_splitter.objectName() == "contentSplitter"

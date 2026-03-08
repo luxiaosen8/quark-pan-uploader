@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QProgressBar,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QTableWidget,
@@ -81,6 +82,15 @@ class MainWindow(QWidget):
         self.log_card, self.log_layout, self.log_section_title = self._create_card(
             "logCard", "运行日志", "记录刷新、上传、分享与重试信息"
         )
+        self.controls_scroll = QScrollArea()
+        self.controls_scroll.setWidgetResizable(True)
+        self.controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.controls_body = QWidget()
+        self.controls_body_layout = QVBoxLayout(self.controls_body)
+        self.controls_body_layout.setContentsMargins(0, 0, 0, 0)
+        self.controls_body_layout.setSpacing(8)
+        self.controls_scroll.setWidget(self.controls_body)
 
         self._configure_widgets()
         self._build_layout()
@@ -96,7 +106,7 @@ class MainWindow(QWidget):
         card.setObjectName(object_name)
         card.setProperty("card", True)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(12)
 
         title_label = QLabel(title)
@@ -141,7 +151,7 @@ class MainWindow(QWidget):
         self.task_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.task_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.task_table.verticalHeader().setVisible(False)
-        self.task_table.setMinimumHeight(280)
+        self.task_table.setMinimumHeight(140)
         header = self.task_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -151,7 +161,10 @@ class MainWindow(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         header.setStretchLastSection(False)
 
-        self.log_output.setMinimumHeight(180)
+        self.controls_card.setMinimumWidth(430)
+        self.remote_card.setMinimumWidth(520)
+        self.remote_tree.setMinimumHeight(220)
+        self.log_output.setMinimumHeight(90)
         self.log_output.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.log_output.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
 
@@ -174,32 +187,34 @@ class MainWindow(QWidget):
         self.summary_layout.addLayout(summary_meta_row)
         self.summary_layout.addWidget(self.overall_progress_bar)
 
-        self.controls_layout.addWidget(self._create_subsection_label("账号连接"))
-        self.controls_layout.addWidget(self.cookie_input)
+        self.controls_layout.addWidget(self.controls_scroll, 1)
+
+        self.controls_body_layout.addWidget(self._create_subsection_label("账号连接"))
+        self.controls_body_layout.addWidget(self.cookie_input)
         auth_button_row = QHBoxLayout()
         auth_button_row.setSpacing(10)
         auth_button_row.addWidget(self.official_login_button)
         auth_button_row.addWidget(self.refresh_button)
-        self.controls_layout.addLayout(auth_button_row)
-        self.controls_layout.addWidget(self.remember_cookie_checkbox)
+        self.controls_body_layout.addLayout(auth_button_row)
+        self.controls_body_layout.addWidget(self.remember_cookie_checkbox)
 
-        self.controls_layout.addSpacing(6)
-        self.controls_layout.addWidget(self._create_subsection_label("本地与输出"))
-        self.controls_layout.addWidget(self.local_root_label)
+        self.controls_body_layout.addSpacing(2)
+        self.controls_body_layout.addWidget(self._create_subsection_label("本地与输出"))
+        self.controls_body_layout.addWidget(self.local_root_label)
         local_button_column = QVBoxLayout()
         local_button_column.setSpacing(10)
         local_button_column.addWidget(self.select_local_folder_button)
         local_button_column.addWidget(self.open_output_button)
-        self.controls_layout.addLayout(local_button_column)
+        self.controls_body_layout.addLayout(local_button_column)
 
-        self.controls_layout.addSpacing(6)
-        self.controls_layout.addWidget(self._create_subsection_label("任务控制"))
+        self.controls_body_layout.addSpacing(2)
+        self.controls_body_layout.addWidget(self._create_subsection_label("任务控制"))
         action_button_row = QHBoxLayout()
         action_button_row.setSpacing(10)
         action_button_row.addWidget(self.start_button, 1)
         action_button_row.addWidget(self.stop_button, 1)
-        self.controls_layout.addLayout(action_button_row)
-        self.controls_layout.addStretch(1)
+        self.controls_body_layout.addLayout(action_button_row)
+        self.controls_body_layout.addStretch(1)
 
         self.remote_layout.addWidget(self.selected_remote_label)
         self.remote_layout.addWidget(self.remote_tree, 1)
@@ -207,28 +222,36 @@ class MainWindow(QWidget):
         self.task_layout.addWidget(self.task_table)
         self.log_layout.addWidget(self.log_output)
 
-        top_splitter = QSplitter(Qt.Orientation.Horizontal)
-        top_splitter.setChildrenCollapsible(False)
-        top_splitter.addWidget(self.controls_card)
-        top_splitter.addWidget(self.remote_card)
-        top_splitter.setStretchFactor(0, 0)
-        top_splitter.setStretchFactor(1, 1)
-        top_splitter.setSizes([360, 760])
+        self.top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.top_splitter.setChildrenCollapsible(False)
+        self.top_splitter.addWidget(self.controls_card)
+        self.top_splitter.addWidget(self.remote_card)
+        self.top_splitter.setStretchFactor(0, 0)
+        self.top_splitter.setStretchFactor(1, 1)
+        self.top_splitter.setSizes([430, 820])
 
-        lower_splitter = QSplitter(Qt.Orientation.Vertical)
-        lower_splitter.setChildrenCollapsible(False)
-        lower_splitter.addWidget(self.task_card)
-        lower_splitter.addWidget(self.log_card)
-        lower_splitter.setStretchFactor(0, 3)
-        lower_splitter.setStretchFactor(1, 2)
-        lower_splitter.setSizes([400, 220])
+        self.lower_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.lower_splitter.setChildrenCollapsible(False)
+        self.lower_splitter.addWidget(self.task_card)
+        self.lower_splitter.addWidget(self.log_card)
+        self.lower_splitter.setStretchFactor(0, 3)
+        self.lower_splitter.setStretchFactor(1, 1)
+        self.lower_splitter.setSizes([180, 90])
+
+        self.content_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.content_splitter.setObjectName("contentSplitter")
+        self.content_splitter.setChildrenCollapsible(False)
+        self.content_splitter.addWidget(self.top_splitter)
+        self.content_splitter.addWidget(self.lower_splitter)
+        self.content_splitter.setStretchFactor(0, 7)
+        self.content_splitter.setStretchFactor(1, 3)
+        self.content_splitter.setSizes([560, 160])
 
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(16)
         layout.addWidget(self.summary_card)
-        layout.addWidget(top_splitter, 1)
-        layout.addWidget(lower_splitter, 2)
+        layout.addWidget(self.content_splitter, 1)
         self.setLayout(layout)
 
     def _create_subsection_label(self, text: str) -> QLabel:
