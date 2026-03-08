@@ -11,7 +11,7 @@
 
 ### Windows 预构建包
 
-- [下载 Windows x64 安装包（ZIP）](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.1.0/quark_uploader-windows-x64-v0.1.0.zip)
+- [下载 Windows x64 免安装包（ZIP）](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.1.0/quark_uploader-windows-x64-v0.1.0.zip)
 - [下载 SHA256 校验文件](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.1.0/quark_uploader-windows-x64-v0.1.0.sha256.txt)
 - [查看完整 Release 页面](https://github.com/luxiaosen8/quark-pan-uploader/releases/tag/v0.1.0)
 
