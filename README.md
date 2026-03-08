@@ -7,6 +7,22 @@
 
 一个基于 **Python 3.12 + PySide6** 的 Windows 桌面工具，用于将本地文件批量上传到夸克网盘，并在上传完成后生成分享链接。
 
+## 下载
+
+### Windows 预构建包
+
+- [下载 Windows x64 安装包（ZIP）](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.1.0/quark_uploader-windows-x64-v0.1.0.zip)
+- [下载 SHA256 校验文件](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.1.0/quark_uploader-windows-x64-v0.1.0.sha256.txt)
+- [查看完整 Release 页面](https://github.com/luxiaosen8/quark-pan-uploader/releases/tag/v0.1.0)
+
+### 使用方式
+
+1. 下载并解压 `quark_uploader-windows-x64-v0.1.0.zip`
+2. 运行 `quark_uploader.exe`
+3. 首次启动后，程序会在本地自动创建 `output/` 与 `.local/` 目录
+
+如果你希望自行验证完整性，可以使用发布页中的 `SHA256` 文件进行校验。
+
 ## 截图
 
 ![Quark Pan Uploader main window](./assets/readme-main-window.png)
