@@ -1,150 +1,107 @@
-# 夸克网盘批量上传分享工具
+# Quark Uploader
 
-一个基于 **Python + PySide6** 的 Windows 桌面工具，用于：
+一个基于 **Python 3.12 + PySide6** 的 Windows 桌面工具，用于批量上传本地内容到夸克网盘并生成分享链接。
 
-- 使用夸克网盘 Cookie 刷新网盘目录
-- 选择本地根目录后，按 **一级子文件夹** 构建上传任务
-- 将每个一级子文件夹递归上传到选定的网盘目录
-- 在每个子文件夹上传完成后创建分享链接
-- 实时写入 `share_links.txt`、汇总结果 CSV 和按运行归档的明细结果
+## 功能概览
+
+- 使用 Cookie 或官方登录流程连接夸克网盘
+- 刷新并选择目标网盘目录
+- 支持两种上传模式：
+  - `batch_subfolders`：扫描本地根目录下一级子文件夹并逐项上传
+  - `single_target`：直接上传单个文件夹或单个文件
+- 为上传完成的远端项目创建分享链接
+- 输出根目录汇总结果与按运行归档的详细结果
+- 主界面采用“上栏操作区 + 下栏标签页工作台”布局，便于查看任务、目录与日志
 
 ## 环境要求
 
 - Windows 10 / 11
 - Python 3.12+
-- 已安装项目依赖（推荐使用仓库内 `.venv`）
+- 建议使用虚拟环境运行
 
-## 安装与运行
+## 安装
 
-### 1. 安装依赖
-
-如果你已经有仓库内虚拟环境，可以直接复用；否则请先按项目习惯安装依赖。
-
-### 2. 启动 GUI
+### 方式一：使用项目虚拟环境
 
 ```bat
-C:\Users\78221\Desktop\workspace\trae-cn\号池\wangpan\.venv\Scripts\python.exe -m quark_uploader.main
+python -m venv .venv
+.\.venv\Scriptsctivate
+python -m pip install -e .
 ```
 
-## 使用说明
-
-1. 在主界面粘贴 Cookie，或点击 **官方登录**
-2. 点击 **刷新网盘**，确认目录树加载成功
-3. 点击 **选择本地文件夹**，扫描本地一级子文件夹
-4. 在网盘目录树中选择目标目录
-5. 点击 **开始上传**
-6. 上传完成后，在输出目录查看分享链接和明细结果
-
-> 说明：前端测试用的“清理测试目录”按钮已移除，不再暴露在正式 UI 中。
-
-### 空目录规则
-
-- 本地根目录下的空一级子文件夹会显示在任务表格中
-- 这类任务会被标记为 `skipped`
-- 不会进入远端创建目录、上传或分享流程
-
-## 输出文件
-
-默认输出目录：`output`
-
-> 运行时路径规则：
-> - 源码模式下，`output` 和 `.local/app_settings.json` 相对仓库根目录解析
-> - 打包后的 EXE 下，`output` 和 `.local/app_settings.json` 固定相对 **EXE 所在目录** 解析，而不是相对当前工作目录
-
-### 根目录汇总产物
-
-- `output/share_links.txt`：一行一个分享链接
-- `output/share_results.csv`：跨运行汇总的结果 CSV
-- `output/logs/YYYY-MM-DD.jsonl`：按日期写入的结构化日志
-
-### 单次运行归档
-
-- `output/runs/<run_id>/share_results.jsonl`
-- `output/runs/<run_id>/share_results.csv`
-- `output/runs/<run_id>/events.jsonl`
-- `output/runs/<run_id>/cleanup_results.jsonl`
-- `output/runs/<run_id>/cleanup_results.csv`
-
-## 配置与安全
-
-设置文件路径：`.local/app_settings.json`
-
-首次启动时，程序会自动：
-
-- 创建 `.local/app_settings.json` 默认配置文件
-- 创建 `output/` 目录
-- 写入一条 `startup` 结构化日志，用于排查首次启动与打包运行问题
-
-当前支持的主要配置项：
-
-- `output_dir`
-- `request_timeout_seconds`
-- `file_retry_limit`
-- `share_retry_limit`
-- `share_poll_max_retries`
-- `retry_backoff_base_seconds`
-- `share_poll_interval_seconds`
-
-> 注意：持久化 Cookie 时，不会以明文字段直接写入设置文件。
-
-## 测试
-
-运行全量测试：
+### 方式二：使用 uv
 
 ```bat
-C:\Users\78221\Desktop\workspace\trae-cn\号池\wangpan\.venv\Scripts\python.exe -m pytest -q
+uv sync
 ```
 
-运行重点测试：
+## 启动应用
 
 ```bat
-C:\Users\78221\Desktop\workspace\trae-cn\号池\wangpan\.venv\Scripts\python.exe -m pytest tests\services -q
-C:\Users\78221\Desktop\workspace\trae-cn\号池\wangpan\.venv\Scripts\python.exe -m pytest tests\gui -q
+python -m quark_uploader.main
 ```
+
+如果你在虚拟环境中运行，也可以显式使用虚拟环境解释器：
+
+```bat
+.\.venv\Scripts\python.exe -m quark_uploader.main
+```
+
+## 使用流程
+
+1. 输入 Cookie，或点击 **官方登录**
+2. 点击 **刷新网盘** 获取远端目录
+3. 选择本地来源（批量子文件夹 / 单文件夹 / 单文件）
+4. 在远端目录中选择上传目标
+5. 点击 **开始上传** 执行任务
+6. 在任务页、目录页与日志页查看执行结果
+
+## 输出与配置
+
+默认输出目录为 `output/`。
+
+运行时会使用：
+
+- `output/`：结果与日志输出目录
+- `.local/app_settings.json`：本地设置文件
+
+程序会在运行时自动创建所需目录与文件；这些本地产物默认不应提交到版本控制。
 
 ## 打包
 
-仓库已提供：
+仓库已提供以下 Windows 打包文件：
 
 - `scripts/build_windows.ps1`
 - `quark_uploader.spec`
+- `windows_version_info.txt`
 
 执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+powershell -ExecutionPolicy Bypass -File .\scriptsuild_windows.ps1
 ```
 
-如果本地尚未安装 PyInstaller，脚本会提示你先安装。
+## 安全说明
 
-## 常见问题
+- 不要提交真实 Cookie、令牌、日志、`.env`、`.local/`、`output/` 或构建产物
+- 如果需要共享问题样例，请先对 Cookie、链接、目录名和日志内容进行脱敏
+- 调试模式下可能生成额外日志，请在公开分享前确认已清理
 
-### 刷新网盘失败
+## 公开仓库说明
 
-常见原因：
+当前公开仓库聚焦于：
 
-- Cookie 失效
-- 网络异常
-- 接口返回异常
+- 应用源码
+- 打包脚本
+- 面向公开协作的基础文档
 
-程序会回退连接状态，并保留本地目录扫描结果，便于重试。
+内部测试资产、过程性设计草案和本地协作文档不包含在公开发布版本中。
 
-### 任务显示 `retrying`
+## 许可证
 
-表示上传或分享在失败后进入重试流程，系统会按配置进行退避等待。
+本项目采用 [MIT License](./LICENSE)。
 
-### 任务显示 `failed`
+## 相关文档
 
-表示该一级子文件夹任务最终失败，可查看：
-
-- 表格状态
-- 日志面板
-- `share_results.csv` / `share_results.jsonl`
-
-
-## Debug 启动跟踪
-
-- 正式版默认不生成 `bootstrap_trace.log`
-- 仅在 debug 模式启用：
-  - 环境变量：`QUARK_UPLOADER_DEBUG=1`
-  - 或设置文件：`debug_mode=true`
+- [SECURITY.md](./SECURITY.md)
+- [CONTRIBUTING.md](./CONTRIBUTING.md)

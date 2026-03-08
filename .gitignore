@@ -5,10 +5,15 @@ __pycache__/
 dist/
 build/
 output/
-
 .local/
 debug_large/
 debug_small/
 debug_stop/
 cleanup-output/
 custom-output/
+.env
+.env.*
+*.log
+bootstrap_trace.log
+AGENTS.md
+docs/plans/
