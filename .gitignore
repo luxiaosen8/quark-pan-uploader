@@ -7,3 +7,8 @@ build/
 output/
 
 .local/
+debug_large/
+debug_small/
+debug_stop/
+cleanup-output/
+custom-output/

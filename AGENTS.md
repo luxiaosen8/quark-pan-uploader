@@ -51,6 +51,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
   - `output/`
   - `output/logs/YYYY-MM-DD.jsonl` 中的 startup 日志
 
+## 仓库清理与发布准备
+
+- 上传仓库前应优先清理本地构建产物、缓存目录和调试残留，避免误提交无关文件
+- `debug_large/`、`debug_small/`、`debug_stop/`、`cleanup-output/`、`custom-output/` 视为本地调试/输出目录，不应纳入版本控制
+- 构建产物与运行输出目录（如 `build/`、`dist/`、`output/`、`.local/`、`.pytest_cache/`）应保持本地可清理状态
+
 ## UI 约束
 
 - 前端测试用的“清理测试目录”按钮已从正式 UI 中移除
