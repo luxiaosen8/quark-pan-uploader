@@ -56,7 +56,8 @@ class MainWindowController:
         self.window.stop_button.clicked.connect(self.stop_upload)
         self.window.stop_button.setEnabled(False)
         self.window.remote_tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
-        self.window.upload_mode_batch_radio.toggled.connect(self._on_upload_mode_radio_toggled)
+        self.window.upload_mode_batch_button.clicked.connect(lambda: self._set_upload_mode(UploadMode.BATCH_SUBFOLDERS))
+        self.window.upload_mode_single_button.clicked.connect(lambda: self._set_upload_mode(UploadMode.SINGLE_TARGET))
         self._load_settings()
         self.window.remote_tree.itemExpanded.connect(self.on_tree_item_expanded)
 
@@ -99,10 +100,6 @@ class MainWindowController:
         self.current_upload_mode = mode
         self.window.set_upload_mode(mode.value)
         self._clear_local_selection()
-
-    def _on_upload_mode_radio_toggled(self, checked: bool) -> None:
-        mode = UploadMode.BATCH_SUBFOLDERS if checked else UploadMode.SINGLE_TARGET
-        self._set_upload_mode(mode)
 
     def browse_local_root(self) -> None:
         path = QFileDialog.getExistingDirectory(self.window, "选择本地文件夹")

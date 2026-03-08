@@ -24,6 +24,7 @@ def test_single_target_mode_shows_single_target_actions(qtbot):
 
     window.set_upload_mode("single_target")
 
+    assert window.upload_mode_single_button.isChecked() is True
     assert window.select_local_folder_button.isHidden() is True
     assert window.select_single_folder_button.isHidden() is False
     assert window.select_single_file_button.isHidden() is False

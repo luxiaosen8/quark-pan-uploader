@@ -226,7 +226,7 @@ def test_controller_mode_switch_clears_selected_source_state(qtbot, tmp_path):
     )
 
     controller.apply_local_root(str(source_dir))
-    window.upload_mode_single_radio.click()
+    window.upload_mode_single_button.click()
 
     assert window.local_root == ""
     assert window.task_table.rowCount() == 0
