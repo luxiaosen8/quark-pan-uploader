@@ -3,21 +3,21 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFontDatabase, QIcon
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
-    QRadioButton,
+    QPlainTextEdit,
     QPushButton,
     QProgressBar,
     QScrollArea,
     QSizePolicy,
-    QSplitter,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
-    QPlainTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -68,9 +68,17 @@ class MainWindow(QWidget):
         self.summary_hint_label = QLabel("连接账号、选择目录并执行任务")
         self.summary_hint_label.setObjectName("sectionSubtitle")
         self.selected_remote_label = QLabel("当前选择：未选择")
-        self.upload_mode_batch_radio = QRadioButton("批量子文件夹")
-        self.upload_mode_single_radio = QRadioButton("单文件/单文件夹")
-        self.upload_mode_batch_radio.setChecked(True)
+        self.upload_mode_section_label = QLabel("上传模式")
+        self.upload_mode_section_label.setObjectName("subsectionLabel")
+        self.upload_mode_batch_button = QPushButton("批量子文件夹")
+        self.upload_mode_batch_button.setCheckable(True)
+        self.upload_mode_single_button = QPushButton("单文件/单文件夹")
+        self.upload_mode_single_button.setCheckable(True)
+        self.upload_mode_group = QButtonGroup(self)
+        self.upload_mode_group.setExclusive(True)
+        self.upload_mode_group.addButton(self.upload_mode_batch_button)
+        self.upload_mode_group.addButton(self.upload_mode_single_button)
+        self.upload_mode_batch_button.setChecked(True)
         self.selected_remote_label.setObjectName("selectedRemoteLabel")
 
         self.summary_card, self.summary_layout, self.summary_card_title = self._create_card(
@@ -88,6 +96,7 @@ class MainWindow(QWidget):
         self.log_card, self.log_layout, self.log_section_title = self._create_card(
             "logCard", "运行日志", "记录刷新、上传、分享与重试信息"
         )
+        self.workspace_tabs = QTabWidget()
         self.controls_scroll = QScrollArea()
         self.controls_scroll.setWidgetResizable(True)
         self.controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -95,13 +104,14 @@ class MainWindow(QWidget):
         self.controls_body = QWidget()
         self.controls_body_layout = QVBoxLayout(self.controls_body)
         self.controls_body_layout.setContentsMargins(0, 0, 0, 0)
-        self.controls_body_layout.setSpacing(4)
+        self.controls_body_layout.setSpacing(0)
         self.controls_scroll.setWidget(self.controls_body)
 
-        self.summary_card_title.hide()
-        summary_subtitle = self.summary_layout.itemAt(1).widget()
-        if summary_subtitle is not None:
-            summary_subtitle.hide()
+        self._hide_card_header(self.summary_layout, self.summary_card_title)
+        self._hide_card_header(self.controls_layout, self.controls_card_title)
+        self._hide_card_header(self.remote_layout, self.remote_section_title)
+        self._hide_card_header(self.task_layout, self.task_section_title)
+        self._hide_card_header(self.log_layout, self.log_section_title)
         self._configure_widgets()
         self._build_layout()
         self._apply_styles()
@@ -130,6 +140,25 @@ class MainWindow(QWidget):
         layout.addWidget(subtitle_label)
         return card, layout, title_label
 
+    def _hide_card_header(self, layout: QVBoxLayout, title_label: QLabel) -> None:
+        title_label.hide()
+        subtitle = layout.itemAt(1).widget()
+        if subtitle is not None:
+            subtitle.hide()
+
+    def _create_operation_panel(self, object_name: str, title: str) -> tuple[QFrame, QVBoxLayout]:
+        panel = QFrame()
+        panel.setObjectName(object_name)
+        panel.setProperty("operationPanel", True)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("subsectionLabel")
+        layout.addWidget(title_label)
+        return panel, layout
+
     def _configure_widgets(self) -> None:
         self.setObjectName("rootWidget")
         self.resize(1280, 860)
@@ -144,6 +173,8 @@ class MainWindow(QWidget):
 
         self.start_button.setObjectName("primaryButton")
         self.stop_button.setObjectName("dangerButton")
+        self.upload_mode_batch_button.setObjectName("modeButton")
+        self.upload_mode_single_button.setObjectName("modeButton")
         self.refresh_button.setObjectName("secondaryButton")
         self.official_login_button.setObjectName("secondaryButton")
         self.select_local_folder_button.setObjectName("secondaryButton")
@@ -153,9 +184,10 @@ class MainWindow(QWidget):
 
         self.cookie_input.setClearButtonEnabled(True)
         self.cookie_input.setMinimumHeight(32)
+        self.selected_remote_label.setWordWrap(True)
 
         self.remote_tree.setAlternatingRowColors(True)
-        self.remote_tree.setMinimumHeight(260)
+        self.remote_tree.setMinimumHeight(240)
         self.remote_tree.setColumnWidth(0, 260)
         self.remote_tree.setRootIsDecorated(True)
 
@@ -164,7 +196,7 @@ class MainWindow(QWidget):
         self.task_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.task_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.task_table.verticalHeader().setVisible(False)
-        self.task_table.setMinimumHeight(150)
+        self.task_table.setMinimumHeight(0)
         header = self.task_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -174,10 +206,18 @@ class MainWindow(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         header.setStretchLastSection(False)
 
-        self.controls_card.setMinimumWidth(430)
-        self.remote_card.setMinimumWidth(520)
-        self.remote_tree.setMinimumHeight(220)
-        self.log_output.setMinimumHeight(140)
+        self.workspace_tabs.setObjectName("workspaceTabs")
+        self.workspace_tabs.setDocumentMode(True)
+        self.workspace_tabs.setMovable(False)
+        self.workspace_tabs.setUsesScrollButtons(False)
+        self.workspace_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        self.workspace_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        self.controls_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        self.summary_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        self.controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.controls_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.log_output.setMinimumHeight(0)
         self.log_output.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.log_output.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.log_output.setMaximumBlockCount(1000)
@@ -208,85 +248,73 @@ class MainWindow(QWidget):
         summary_meta_row.addWidget(self.progress_summary_label, 1)
         self.summary_layout.addLayout(summary_meta_row)
         self.summary_layout.addWidget(self.overall_progress_bar)
+        self.summary_layout.addWidget(self.selected_remote_label)
 
-        self.controls_layout.itemAt(1).widget().hide()
-        self.controls_layout.addWidget(self.controls_scroll, 1)
+        self.controls_layout.addWidget(self.summary_card)
+        self.controls_layout.addWidget(self.controls_scroll)
 
-        upload_mode_row = QHBoxLayout()
-        upload_mode_row.setSpacing(10)
-        upload_mode_row.addWidget(self.upload_mode_batch_radio)
-        upload_mode_row.addWidget(self.upload_mode_single_radio)
-        upload_mode_row.addStretch(1)
-        self.controls_body_layout.addLayout(upload_mode_row)
-
-        self.controls_body_layout.addWidget(self._create_subsection_label("账号连接"))
-        self.controls_body_layout.addWidget(self.cookie_input)
+        connection_panel, connection_layout = self._create_operation_panel("connectionPanel", "账号连接")
+        connection_layout.addWidget(self.cookie_input)
         auth_button_row = QHBoxLayout()
         auth_button_row.setSpacing(8)
         auth_button_row.addWidget(self.official_login_button)
         auth_button_row.addWidget(self.refresh_button)
-        self.controls_body_layout.addLayout(auth_button_row)
-        self.controls_body_layout.addWidget(self.remember_cookie_checkbox)
+        connection_layout.addLayout(auth_button_row)
+        connection_layout.addWidget(self.remember_cookie_checkbox)
+        connection_layout.addStretch(1)
 
-        self.controls_body_layout.addSpacing(2)
-        self.controls_body_layout.addWidget(self.local_root_label)
-        local_button_row = QHBoxLayout()
-        local_button_row.setSpacing(8)
-        local_button_row.addWidget(self.select_local_folder_button)
-        local_button_row.addWidget(self.open_output_button)
-        self.controls_body_layout.addLayout(local_button_row)
-
+        source_panel, source_layout = self._create_operation_panel("sourcePanel", "上传来源")
+        source_layout.addWidget(self.upload_mode_section_label)
+        upload_mode_row = QHBoxLayout()
+        upload_mode_row.setSpacing(8)
+        upload_mode_row.addWidget(self.upload_mode_batch_button)
+        upload_mode_row.addWidget(self.upload_mode_single_button)
+        source_layout.addLayout(upload_mode_row)
+        source_layout.addWidget(self.local_root_label)
+        batch_button_row = QHBoxLayout()
+        batch_button_row.setSpacing(8)
+        batch_button_row.addWidget(self.select_local_folder_button)
+        batch_button_row.addStretch(1)
+        source_layout.addLayout(batch_button_row)
         self.single_target_button_row = QHBoxLayout()
         self.single_target_button_row.setSpacing(10)
         self.single_target_button_row.addWidget(self.select_single_folder_button)
         self.single_target_button_row.addWidget(self.select_single_file_button)
-        self.controls_body_layout.addLayout(self.single_target_button_row)
+        source_layout.addLayout(self.single_target_button_row)
+        source_layout.addStretch(1)
 
-        self.controls_body_layout.addSpacing(2)
-        action_button_row = QHBoxLayout()
-        action_button_row.setSpacing(8)
-        action_button_row.addWidget(self.start_button, 1)
-        action_button_row.addWidget(self.stop_button, 1)
-        self.controls_body_layout.addLayout(action_button_row)
+        action_panel, action_layout = self._create_operation_panel("actionPanel", "任务执行")
+        action_hint_label = QLabel("确认本地来源与目标目录后开始上传任务。")
+        action_hint_label.setObjectName("panelHint")
+        action_hint_label.setWordWrap(True)
+        action_layout.addWidget(action_hint_label)
+        action_layout.addWidget(self.start_button)
+        action_layout.addWidget(self.stop_button)
+        action_layout.addWidget(self.open_output_button)
+        action_layout.addStretch(1)
+
+        sections_row = QHBoxLayout()
+        sections_row.setSpacing(12)
+        sections_row.addWidget(connection_panel, 5)
+        sections_row.addWidget(source_panel, 6)
+        sections_row.addWidget(action_panel, 4)
+        self.controls_body_layout.addLayout(sections_row)
         self.controls_body_layout.addStretch(1)
 
-        self.remote_layout.addWidget(self.selected_remote_label)
         self.remote_layout.addWidget(self.remote_tree, 1)
-
         self.task_layout.addWidget(self.task_table)
         self.log_layout.addWidget(self.log_output)
 
-        self.top_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.top_splitter.setChildrenCollapsible(False)
-        self.top_splitter.addWidget(self.controls_card)
-        self.top_splitter.addWidget(self.remote_card)
-        self.top_splitter.setStretchFactor(0, 0)
-        self.top_splitter.setStretchFactor(1, 1)
-        self.top_splitter.setSizes([430, 820])
-        self.top_splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        self.workbench_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.workbench_splitter.setObjectName("workbenchSplitter")
-        self.workbench_splitter.setChildrenCollapsible(False)
-        self.workbench_splitter.addWidget(self.task_card)
-        self.workbench_splitter.addWidget(self.log_card)
-        self.workbench_splitter.setStretchFactor(0, 3)
-        self.workbench_splitter.setStretchFactor(1, 2)
-        self.workbench_splitter.setSizes([190, 150])
-
-        self.content_splitter = QWidget()
-        self.content_splitter.setObjectName("contentSplitter")
-        content_layout = QVBoxLayout(self.content_splitter)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(14)
-        content_layout.addWidget(self.top_splitter, 6)
-        content_layout.addWidget(self.workbench_splitter, 3)
+        self.workspace_tabs.addTab(self.task_card, "上传任务")
+        self.workspace_tabs.addTab(self.remote_card, "目标网盘目录")
+        self.workspace_tabs.addTab(self.log_card, "运行日志")
+        self.workspace_tabs.setCurrentWidget(self.task_card)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(14)
-        layout.addWidget(self.summary_card)
-        layout.addWidget(self.content_splitter, 1)
+        layout.addWidget(self.controls_card)
+        layout.addWidget(self.workspace_tabs, 1)
         self.setLayout(layout)
 
     def _create_subsection_label(self, text: str) -> QLabel:
@@ -304,6 +332,22 @@ class MainWindow(QWidget):
                 background: #ffffff;
                 border: 1px solid #d8e1ec;
                 border-radius: 14px;
+            }
+            QFrame#summaryCard {
+                background: #f8fbff;
+                border: 1px solid #d7e7ff;
+                border-radius: 12px;
+            }
+            QFrame#taskCard,
+            QFrame#remoteCard,
+            QFrame#logCard {
+                background: transparent;
+                border: none;
+            }
+            QFrame[operationPanel="true"] {
+                background: #f8fafc;
+                border: 1px solid #dbe3ee;
+                border-radius: 12px;
             }
             QLabel#windowTitleLabel {
                 font-size: 20px;
@@ -335,10 +379,17 @@ class MainWindow(QWidget):
                 font-weight: 600;
             }
             QLabel#selectedRemoteLabel {
-                color: #2563eb;
+                color: #1d4ed8;
                 font-size: 13px;
                 font-weight: 600;
-                padding: 4px 0 8px 0;
+                padding: 8px 10px;
+                background: #eff6ff;
+                border: 1px solid #bfdbfe;
+                border-radius: 10px;
+            }
+            QLabel#panelHint {
+                color: #64748b;
+                font-size: 12px;
             }
             QLabel#statusChip {
                 padding: 6px 12px;
@@ -396,6 +447,19 @@ class MainWindow(QWidget):
             QPushButton#secondaryButton {
                 background: #ffffff;
             }
+            QPushButton#modeButton {
+                min-height: 26px;
+                background: #eef4ff;
+                color: #1e3a8a;
+                border: 1px solid #c7d7ff;
+                font-weight: 700;
+                padding: 3px 10px;
+            }
+            QPushButton#modeButton:checked {
+                background: #2563eb;
+                color: white;
+                border: 1px solid #2563eb;
+            }
             QPushButton#primaryButton {
                 background: #2563eb;
                 color: white;
@@ -411,6 +475,34 @@ class MainWindow(QWidget):
             }
             QPushButton#dangerButton:hover {
                 background: #ffedd5;
+            }
+            QPushButton#primaryButton,
+            QPushButton#dangerButton {
+                min-height: 34px;
+            }
+            QTabWidget::pane {
+                border: 1px solid #d8e1ec;
+                border-radius: 14px;
+                background: #ffffff;
+                top: -1px;
+            }
+            QTabBar::tab {
+                background: #e7eef7;
+                color: #475569;
+                border: 1px solid #d8e1ec;
+                border-bottom: none;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                padding: 8px 16px;
+                margin-right: 6px;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                color: #0f172a;
+                font-weight: 700;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #f1f5f9;
             }
             QPushButton:disabled {
                 background: #e5e7eb;
@@ -430,7 +522,7 @@ class MainWindow(QWidget):
             }
             QCheckBox, QRadioButton {
                 color: #334155;
-                font-size: 12px;
+                font-size: 11px;
             }
         ''')
 
@@ -460,8 +552,8 @@ class MainWindow(QWidget):
 
     def set_upload_mode(self, mode: str) -> None:
         is_batch = mode == UploadMode.BATCH_SUBFOLDERS.value
-        self.upload_mode_batch_radio.setChecked(is_batch)
-        self.upload_mode_single_radio.setChecked(not is_batch)
+        self.upload_mode_batch_button.setChecked(is_batch)
+        self.upload_mode_single_button.setChecked(not is_batch)
         self.select_local_folder_button.setVisible(is_batch)
         self.select_single_folder_button.setVisible(not is_batch)
         self.select_single_file_button.setVisible(not is_batch)
