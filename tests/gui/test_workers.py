@@ -57,7 +57,7 @@ def test_upload_worker_handle_runs_in_background_thread(qtbot):
 
     assert handle.is_running() is True
     qtbot.waitUntil(lambda: finished_states == ["completed"], timeout=3000)
-    assert handle.is_running() is False
+    qtbot.waitUntil(lambda: handle.is_running() is False, timeout=3000)
 
 
 

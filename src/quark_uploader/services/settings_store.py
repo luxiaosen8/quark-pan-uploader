@@ -11,6 +11,13 @@ class AppSettingsStore:
     def __init__(self, settings_path: Path) -> None:
         self.settings_path = settings_path
 
+    def ensure_exists(self, defaults: AppSettings | None = None) -> AppSettings:
+        if self.settings_path.exists():
+            return self.load()
+        settings = defaults or AppSettings()
+        self.save(settings)
+        return settings
+
     def load(self) -> AppSettings:
         if not self.settings_path.exists():
             return AppSettings()

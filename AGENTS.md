@@ -41,3 +41,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 - 刷新网盘失败会回退连接态，避免 UI 残留错误状态
 - 输出目录同时保留根目录汇总结果与 `runs/<run_id>` 归档
 - 设置文件中的持久化 Cookie 不以明文字段落盘
+
+## 运行时路径
+
+- 源码模式：输出目录和设置文件相对仓库根目录解析
+- 打包 EXE 模式：输出目录和设置文件相对 EXE 所在目录解析
+- 首次启动会自动创建：
+  - `.local/app_settings.json`
+  - `output/`
+  - `output/logs/YYYY-MM-DD.jsonl` 中的 startup 日志
+
+## UI 约束
+
+- 前端测试用的“清理测试目录”按钮已从正式 UI 中移除

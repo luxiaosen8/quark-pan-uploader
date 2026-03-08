@@ -35,6 +35,8 @@ C:\Users\78221\Desktop\workspace\trae-cn\号池\wangpan\.venv\Scripts\python.exe
 5. 点击 **开始上传**
 6. 上传完成后，在输出目录查看分享链接和明细结果
 
+> 说明：前端测试用的“清理测试目录”按钮已移除，不再暴露在正式 UI 中。
+
 ### 空目录规则
 
 - 本地根目录下的空一级子文件夹会显示在任务表格中
@@ -44,6 +46,10 @@ C:\Users\78221\Desktop\workspace\trae-cn\号池\wangpan\.venv\Scripts\python.exe
 ## 输出文件
 
 默认输出目录：`output`
+
+> 运行时路径规则：
+> - 源码模式下，`output` 和 `.local/app_settings.json` 相对仓库根目录解析
+> - 打包后的 EXE 下，`output` 和 `.local/app_settings.json` 固定相对 **EXE 所在目录** 解析，而不是相对当前工作目录
 
 ### 根目录汇总产物
 
@@ -62,6 +68,12 @@ C:\Users\78221\Desktop\workspace\trae-cn\号池\wangpan\.venv\Scripts\python.exe
 ## 配置与安全
 
 设置文件路径：`.local/app_settings.json`
+
+首次启动时，程序会自动：
+
+- 创建 `.local/app_settings.json` 默认配置文件
+- 创建 `output/` 目录
+- 写入一条 `startup` 结构化日志，用于排查首次启动与打包运行问题
 
 当前支持的主要配置项：
 

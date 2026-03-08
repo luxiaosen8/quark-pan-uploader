@@ -10,7 +10,6 @@ def test_main_window_has_progress_controls_and_task_table(qtbot):
 
     assert window.select_local_folder_button.text() == "选择本地文件夹"
     assert window.open_output_button.text() == "打开输出目录"
-    assert window.cleanup_test_dirs_button.text() == "清理测试目录"
     assert window.task_table.columnCount() == 6
     assert window.overall_progress_bar.value() == 0
 

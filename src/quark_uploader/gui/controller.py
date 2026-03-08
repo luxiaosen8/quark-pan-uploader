@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QFileDialog, QTreeWidgetItem
 from quark_uploader.gui.main_window import MainWindow
 from quark_uploader.gui.workers import UploadWorker, UploadWorkerHandle
 from quark_uploader.models import FolderTaskStatus
+from quark_uploader.paths import resolve_runtime_path
 from quark_uploader.services.cancellation import UploadCancellationToken
 from quark_uploader.services.invoke import call_with_supported_kwargs, call_with_supported_positional_args
 from quark_uploader.services.remote_cleanup_service import RemoteCleanupService
@@ -48,7 +49,6 @@ class MainWindowController:
         self.window.official_login_button.clicked.connect(self.open_official_login)
         self.window.select_local_folder_button.clicked.connect(self.browse_local_root)
         self.window.open_output_button.clicked.connect(self.open_output_directory)
-        self.window.cleanup_test_dirs_button.clicked.connect(self.cleanup_remote_test_directories)
         self.window.start_button.clicked.connect(self.start_upload)
         self.window.stop_button.clicked.connect(self.stop_upload)
         self.window.stop_button.setEnabled(False)
@@ -76,7 +76,7 @@ class MainWindowController:
         self.current_settings = settings
 
     def _output_dir(self) -> Path:
-        return Path(self.current_settings.output_dir)
+        return resolve_runtime_path(self.current_settings.output_dir)
 
     def browse_local_root(self) -> None:
         path = QFileDialog.getExistingDirectory(self.window, "选择本地文件夹")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from quark_uploader.models import AccountSummary, FolderTask, RemoteFolderNode
+from quark_uploader.paths import get_icon_path
 
 
 class MainWindow(QWidget):
@@ -34,7 +36,6 @@ class MainWindow(QWidget):
         self.refresh_button = QPushButton("刷新网盘")
         self.select_local_folder_button = QPushButton("选择本地文件夹")
         self.open_output_button = QPushButton("打开输出目录")
-        self.cleanup_test_dirs_button = QPushButton("清理测试目录")
         self.status_label = QLabel("未连接")
         self.account_label = QLabel("账号：未加载")
         self.local_root_label = QLabel("本地目录：未选择")
@@ -61,7 +62,6 @@ class MainWindow(QWidget):
         local_button_row = QHBoxLayout()
         local_button_row.addWidget(self.select_local_folder_button)
         local_button_row.addWidget(self.open_output_button)
-        local_button_row.addWidget(self.cleanup_test_dirs_button)
 
         layout = QVBoxLayout()
         layout.addWidget(self.cookie_input)
@@ -80,6 +80,9 @@ class MainWindow(QWidget):
         layout.addWidget(self.log_output)
         self.setLayout(layout)
         self.setWindowTitle("夸克网盘批量上传分享工具")
+        icon_path = get_icon_path()
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
     def recompute_start_enabled(self) -> None:
         ready = bool(self.cookie_valid and self.local_root and self.remote_folder_id)

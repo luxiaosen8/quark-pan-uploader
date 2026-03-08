@@ -5,15 +5,18 @@ from pathlib import Path
 block_cipher = None
 project_root = Path(SPECPATH)
 src_dir = project_root / "src"
+icon_file = project_root / "assets" / "app_icon.ico"
+version_file = project_root / "windows_version_info.txt"
 
 a = Analysis(
     [str(src_dir / "quark_uploader" / "main.py")],
     pathex=[str(src_dir)],
     binaries=[],
-    datas=[],
+    datas=[(str(icon_file), "assets")],
     hiddenimports=[
         "PySide6.QtWebEngineCore",
         "PySide6.QtWebEngineWidgets",
+        "charset_normalizer",
     ],
     hookspath=[],
     hooksconfig={},
@@ -40,6 +43,8 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
+    icon=str(icon_file),
+    version=str(version_file),
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
