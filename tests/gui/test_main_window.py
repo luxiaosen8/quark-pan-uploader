@@ -63,3 +63,16 @@ def test_main_window_exposes_upload_mode_switch_and_single_target_buttons(qtbot)
     assert window.select_single_folder_button.text() == "选择单个文件夹"
     assert window.select_single_file_button.text() == "选择单个文件"
     assert window.upload_mode_batch_button.isChecked() is True
+
+
+def test_start_button_returns_focus_to_task_tab(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    window.start_button.setEnabled(True)
+    window.workspace_tabs.setCurrentWidget(window.log_card)
+
+    window.start_button.click()
+
+    assert window.workspace_tabs.currentWidget() is window.task_card

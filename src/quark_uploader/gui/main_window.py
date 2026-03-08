@@ -115,6 +115,7 @@ class MainWindow(QWidget):
         self._configure_widgets()
         self._build_layout()
         self._apply_styles()
+        self.start_button.clicked.connect(self.show_task_tab)
         self.set_upload_mode(UploadMode.BATCH_SUBFOLDERS.value)
 
         self.setWindowTitle("夸克网盘批量上传分享工具")
@@ -316,6 +317,9 @@ class MainWindow(QWidget):
         layout.addWidget(self.controls_card)
         layout.addWidget(self.workspace_tabs, 1)
         self.setLayout(layout)
+
+    def show_task_tab(self) -> None:
+        self.workspace_tabs.setCurrentWidget(self.task_card)
 
     def _create_subsection_label(self, text: str) -> QLabel:
         label = QLabel(text)
