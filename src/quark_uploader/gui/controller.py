@@ -177,7 +177,18 @@ class MainWindowController:
     def on_tree_selection_changed(self) -> None:
         item = self.window.remote_tree.currentItem()
         self.window.remote_folder_id = item.text(1) if item else ""
+        self.window.set_selected_remote_folder(self._build_remote_path(item))
         self.window.recompute_start_enabled()
+
+    def _build_remote_path(self, item: QTreeWidgetItem | None) -> str | None:
+        if item is None:
+            return None
+        parts: list[str] = []
+        current = item
+        while current is not None:
+            parts.append(current.text(0))
+            current = current.parent()
+        return " / ".join(reversed(parts))
 
     def on_tree_item_expanded(self, item: QTreeWidgetItem) -> None:
         if self.current_refresh_service is None:

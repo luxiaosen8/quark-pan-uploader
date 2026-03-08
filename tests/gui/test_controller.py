@@ -37,6 +37,7 @@ def test_controller_refresh_updates_window(qtbot):
     assert window.cookie_valid is True
     assert window.status_label.text() == "已连接"
     assert window.remote_tree.topLevelItemCount() == 1
+    assert window.selected_remote_label.text() == "当前选择：未选择"
 
 
 def test_controller_applies_cookie_from_login_dialog(qtbot):
@@ -185,3 +186,26 @@ def test_controller_refresh_failure_resets_remote_state(qtbot):
     assert window.remote_folder_id == ""
     assert window.remote_tree.topLevelItemCount() == 0
     assert "网盘信息刷新失败：cookie expired" in window.log_output.toPlainText()
+
+
+def test_controller_updates_selected_remote_path_summary(qtbot):
+    create_app()
+    window = MainWindow()
+    qtbot.addWidget(window)
+    window.cookie_input.setText("sid=123")
+    service = FakeNestedRefreshService()
+
+    controller = MainWindowController(
+        window=window,
+        refresh_service_factory=lambda cookie: service,
+        login_dialog_factory=lambda on_success: FakeLoginDialog(None),
+    )
+
+    controller.refresh_drive()
+    root_item = window.remote_tree.topLevelItem(0)
+    controller.on_tree_item_expanded(root_item)
+    child_item = root_item.child(0)
+    window.remote_tree.setCurrentItem(child_item)
+    controller.on_tree_selection_changed()
+
+    assert window.selected_remote_label.text() == "当前选择：资料 / 子目录"

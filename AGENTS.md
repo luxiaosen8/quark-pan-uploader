@@ -62,3 +62,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 - 仅在 debug 模式启用：
   - 环境变量：`QUARK_UPLOADER_DEBUG=1`
   - 或设置文件：`debug_mode=true`
+
+## UI 布局
+
+- 主界面采用“顶部摘要 + 中区双栏 + 任务区 + 底部日志”的专业桌面工具布局
+- `main_window.py` 中保留原有业务控件实例，主要通过卡片式容器和样式表增强表现层
+- `controller.py` 只做小范围视图联动，例如当前选中远端目录摘要

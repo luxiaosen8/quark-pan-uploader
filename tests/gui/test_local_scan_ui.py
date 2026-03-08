@@ -12,6 +12,7 @@ def test_main_window_has_progress_controls_and_task_table(qtbot):
     assert window.open_output_button.text() == "打开输出目录"
     assert window.task_table.columnCount() == 6
     assert window.overall_progress_bar.value() == 0
+    assert window.selected_remote_label.text() == "当前选择：未选择"
 
 
 def test_main_window_populates_task_table_and_retry_count(qtbot):
@@ -26,6 +27,7 @@ def test_main_window_populates_task_table_and_retry_count(qtbot):
     window.update_task_status("课程A", FolderTaskStatus.RETRYING.value, retry_count=2)
     window.set_progress_summary(completed=0, total=1, failed=0)
     window.set_current_action("当前文件：cover.txt")
+    window.set_selected_remote_folder("资料 / 课程A")
 
     assert "C:/素材" in window.local_root_label.text()
     assert window.task_table.rowCount() == 1
@@ -34,3 +36,4 @@ def test_main_window_populates_task_table_and_retry_count(qtbot):
     assert window.task_table.item(0, 5).text() == "2"
     assert window.progress_summary_label.text() == "任务进度：0/1，失败 0"
     assert window.current_action_label.text() == "当前文件：cover.txt"
+    assert window.selected_remote_label.text() == "当前选择：资料 / 课程A"

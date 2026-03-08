@@ -10,6 +10,9 @@ def test_main_window_has_refresh_related_controls(qtbot):
 
     assert window.refresh_button.text() == "刷新网盘"
     assert window.official_login_button.text() == "官方登录"
+    assert window.remote_section_title.text() == "目标网盘目录"
+    assert window.task_section_title.text() == "上传任务"
+    assert window.log_section_title.text() == "运行日志"
 
 
 def test_main_window_populates_remote_tree(qtbot):
