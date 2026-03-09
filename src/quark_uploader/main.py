@@ -7,7 +7,13 @@ from quark_uploader.app import create_app
 from quark_uploader.gui.controller import MainWindowController
 from quark_uploader.gui.main_window import MainWindow
 from quark_uploader.gui.official_login_dialog import OfficialLoginDialog
-from quark_uploader.paths import get_bundle_root, get_runtime_root, get_settings_path, is_frozen_app, resolve_runtime_path
+from quark_uploader.paths import (
+    get_bundle_root,
+    get_runtime_root,
+    get_settings_path,
+    is_frozen_app,
+    resolve_runtime_path,
+)
 from quark_uploader.quark.file_api import QuarkFileApi
 from quark_uploader.quark.session import QuarkSession
 from quark_uploader.quark.share_api import QuarkShareApi
@@ -40,40 +46,61 @@ def _write_bootstrap_trace(stage: str, **extra: object) -> None:
     if not _bootstrap_trace_enabled():
         return
     try:
-        trace_path = get_runtime_root() / 'bootstrap_trace.log'
-        with trace_path.open('a', encoding='utf-8') as handle:
-            handle.write(f"[{stage}] cwd={os.getcwd()} frozen={is_frozen_app()} runtime_root={get_runtime_root()} bundle_root={get_bundle_root()} extra={extra}\n")
+        trace_path = get_runtime_root() / "bootstrap_trace.log"
+        with trace_path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                f"[{stage}] cwd={os.getcwd()} frozen={is_frozen_app()} runtime_root={get_runtime_root()} bundle_root={get_bundle_root()} extra={extra}\n"
+            )
     except Exception:
         pass
 
 
-def build_refresh_service(cookie: str, settings: AppSettings | None = None) -> DriveRefreshService:
+def build_refresh_service(
+    cookie: str, settings: AppSettings | None = None
+) -> DriveRefreshService:
     runtime_settings = settings or AppSettings()
-    session = QuarkSession(cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds)
-    return DriveRefreshService(user_api=QuarkUserApi(session), file_api=QuarkFileApi(session))
+    session = QuarkSession(
+        cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds
+    )
+    return DriveRefreshService(
+        user_api=QuarkUserApi(session), file_api=QuarkFileApi(session)
+    )
 
 
-def build_upload_executor(cookie: str, settings: AppSettings | None = None, logger=None) -> UploadExecutionEngine:
+def build_upload_executor(
+    cookie: str,
+    settings: AppSettings | None = None,
+    logger=None,
+    result_writer: ResultWriter | None = None,
+) -> UploadExecutionEngine:
     runtime_settings = settings or AppSettings()
-    session = QuarkSession(cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds)
+    session = QuarkSession(
+        cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds
+    )
     file_api = QuarkFileApi(session)
     upload_api = QuarkUploadApi(session)
     share_api = QuarkShareApi(session)
     task_api = QuarkTaskApi(session)
-    result_writer = ResultWriter(resolve_runtime_path(runtime_settings.output_dir))
+    runtime_result_writer = result_writer or ResultWriter(
+        resolve_runtime_path(runtime_settings.output_dir)
+    )
     share_service = QuarkShareService(
         share_api=share_api,
         task_api=task_api,
-        result_writer=result_writer,
+        result_writer=runtime_result_writer,
         max_retries=runtime_settings.share_poll_max_retries,
         poll_interval_seconds=runtime_settings.share_poll_interval_seconds,
         logger=logger,
     )
     return UploadExecutionEngine(
         directory_sync_service=RemoteDirectorySyncService(file_api),
-        uploader=QuarkFileUploader(upload_api=upload_api, logger=logger),
+        uploader=QuarkFileUploader(
+            upload_api=upload_api,
+            logger=logger,
+            part_concurrency=runtime_settings.part_concurrency,
+        ),
         share_service=share_service,
-        result_writer=result_writer,
+        result_writer=runtime_result_writer,
         logger=logger,
         file_retry_limit=runtime_settings.file_retry_limit,
         share_retry_limit=runtime_settings.share_retry_limit,
@@ -89,9 +116,13 @@ def build_settings_store() -> AppSettingsStore:
     return AppSettingsStore(get_settings_path())
 
 
-def build_cleanup_service(cookie: str, settings: AppSettings | None = None, logger=None) -> RemoteCleanupService:
+def build_cleanup_service(
+    cookie: str, settings: AppSettings | None = None, logger=None
+) -> RemoteCleanupService:
     runtime_settings = settings or AppSettings()
-    session = QuarkSession(cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds)
+    session = QuarkSession(
+        cookie=cookie, timeout_seconds=runtime_settings.request_timeout_seconds
+    )
     file_api = QuarkFileApi(session)
     result_writer = ResultWriter(resolve_runtime_path(runtime_settings.output_dir))
     return RemoteCleanupService(file_api, result_writer=result_writer, logger=logger)
@@ -107,12 +138,16 @@ def build_main_window() -> MainWindow:
     window = MainWindow()
     window._controller = MainWindowController(
         window=window,
-        refresh_service_factory=lambda cookie: build_refresh_service(cookie, settings=settings_store.load()),
+        refresh_service_factory=lambda cookie: build_refresh_service(
+            cookie, settings=settings_store.load()
+        ),
         login_dialog_factory=build_login_dialog,
-        upload_executor_factory=lambda logger_callback=None: build_upload_executor(
+        upload_executor_factory=lambda logger_callback=None,
+        result_writer=None: build_upload_executor(
             window.cookie_input.text().strip(),
             settings=settings_store.load(),
             logger=logger_callback or window.append_log,
+            result_writer=result_writer,
         ),
         settings_store=settings_store,
         cleanup_service_factory=lambda: build_cleanup_service(
@@ -126,18 +161,18 @@ def build_main_window() -> MainWindow:
 
 
 def main() -> None:
-    _write_bootstrap_trace('main_enter')
+    _write_bootstrap_trace("main_enter")
     try:
         app = create_app()
-        _write_bootstrap_trace('app_created')
+        _write_bootstrap_trace("app_created")
         window = build_main_window()
-        _write_bootstrap_trace('window_built')
+        _write_bootstrap_trace("window_built")
         window.show()
-        _write_bootstrap_trace('window_shown')
+        _write_bootstrap_trace("window_shown")
         app.exec()
-        _write_bootstrap_trace('app_exit')
+        _write_bootstrap_trace("app_exit")
     except Exception:
-        _write_bootstrap_trace('error', traceback=traceback.format_exc())
+        _write_bootstrap_trace("error", traceback=traceback.format_exc())
         raise
 
 
