@@ -11,12 +11,14 @@
 
 ### Windows 预构建包
 
-- [查看最新 Release 页面](https://github.com/luxiaosen8/quark-pan-uploader/releases/latest)
+- [下载 Windows x64 免安装包（ZIP）](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.2.0/quark_uploader-windows-x64-v0.2.0.zip)
+- [下载 SHA256 校验文件](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.2.0/quark_uploader-windows-x64-v0.2.0.sha256.txt)
+- [查看 v0.2.0 Release 页面](https://github.com/luxiaosen8/quark-pan-uploader/releases/tag/v0.2.0)
 - [查看全部历史版本](https://github.com/luxiaosen8/quark-pan-uploader/releases)
 
 ### 使用方式
 
-1. 从最新 Release 页面下载并解压 Windows ZIP 包
+1. 下载并解压 `quark_uploader-windows-x64-v0.2.0.zip`
 2. 运行 `quark_uploader.exe`
 3. 首次启动后，程序会在本地自动创建 `output/` 与 `.local/` 目录
 
@@ -134,7 +136,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 
 - 仓库地址：[luxiaosen8/quark-pan-uploader](https://github.com/luxiaosen8/quark-pan-uploader)
 - 最新发布：[Releases](https://github.com/luxiaosen8/quark-pan-uploader/releases)
-- 当前源码版本：`v0.2.0`
+- 当前发布版本：[`v0.2.0`](https://github.com/luxiaosen8/quark-pan-uploader/releases/tag/v0.2.0)
 
 ## 协作
 
