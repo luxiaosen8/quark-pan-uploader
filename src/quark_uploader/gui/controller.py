@@ -11,9 +11,17 @@ from quark_uploader.gui.workers import UploadWorker, UploadWorkerHandle
 from quark_uploader.models import FolderTaskStatus, UploadMode
 from quark_uploader.paths import resolve_runtime_path
 from quark_uploader.services.cancellation import UploadCancellationToken
-from quark_uploader.services.invoke import call_with_supported_kwargs, call_with_supported_positional_args
+from quark_uploader.services.invoke import (
+    call_with_supported_kwargs,
+    call_with_supported_positional_args,
+)
 from quark_uploader.services.remote_cleanup_service import RemoteCleanupService
-from quark_uploader.services.scanner import EMPTY_FOLDER_MESSAGE, build_single_target_task, scan_first_level_subfolders
+from quark_uploader.services.result_writer import ResultWriter
+from quark_uploader.services.scanner import (
+    EMPTY_FOLDER_MESSAGE,
+    build_single_target_task,
+    scan_first_level_subfolders,
+)
 from quark_uploader.services.upload_workflow import build_upload_plan
 from quark_uploader.settings import AppSettings
 
@@ -49,15 +57,25 @@ class MainWindowController:
         self.window.refresh_button.clicked.connect(self.refresh_drive)
         self.window.official_login_button.clicked.connect(self.open_official_login)
         self.window.select_local_folder_button.clicked.connect(self.browse_local_root)
-        self.window.select_single_folder_button.clicked.connect(self.browse_single_target_folder)
-        self.window.select_single_file_button.clicked.connect(self.browse_single_target_file)
+        self.window.select_single_folder_button.clicked.connect(
+            self.browse_single_target_folder
+        )
+        self.window.select_single_file_button.clicked.connect(
+            self.browse_single_target_file
+        )
         self.window.open_output_button.clicked.connect(self.open_output_directory)
         self.window.start_button.clicked.connect(self.start_upload)
         self.window.stop_button.clicked.connect(self.stop_upload)
         self.window.stop_button.setEnabled(False)
-        self.window.remote_tree.itemSelectionChanged.connect(self.on_tree_selection_changed)
-        self.window.upload_mode_batch_button.clicked.connect(lambda: self._set_upload_mode(UploadMode.BATCH_SUBFOLDERS))
-        self.window.upload_mode_single_button.clicked.connect(lambda: self._set_upload_mode(UploadMode.SINGLE_TARGET))
+        self.window.remote_tree.itemSelectionChanged.connect(
+            self.on_tree_selection_changed
+        )
+        self.window.upload_mode_batch_button.clicked.connect(
+            lambda: self._set_upload_mode(UploadMode.BATCH_SUBFOLDERS)
+        )
+        self.window.upload_mode_single_button.clicked.connect(
+            lambda: self._set_upload_mode(UploadMode.SINGLE_TARGET)
+        )
         self._load_settings()
         self.window.remote_tree.itemExpanded.connect(self.on_tree_item_expanded)
 
@@ -66,7 +84,9 @@ class MainWindowController:
             self.current_settings = AppSettings()
             return
         self.current_settings = self.settings_store.load()
-        self.window.remember_cookie_checkbox.setChecked(self.current_settings.save_cookie)
+        self.window.remember_cookie_checkbox.setChecked(
+            self.current_settings.save_cookie
+        )
         if self.current_settings.persisted_cookie:
             self.window.cookie_input.setText(self.current_settings.persisted_cookie)
         self.window.set_upload_mode(self.current_upload_mode.value)
@@ -74,10 +94,14 @@ class MainWindowController:
     def _persist_settings(self) -> None:
         if self.settings_store is None:
             return
-        settings = self.current_settings.model_copy(update={
-            'save_cookie': self.window.remember_cookie_checkbox.isChecked(),
-            'persisted_cookie': self.window.cookie_input.text().strip() if self.window.remember_cookie_checkbox.isChecked() else '',
-        })
+        settings = self.current_settings.model_copy(
+            update={
+                "save_cookie": self.window.remember_cookie_checkbox.isChecked(),
+                "persisted_cookie": self.window.cookie_input.text().strip()
+                if self.window.remember_cookie_checkbox.isChecked()
+                else "",
+            }
+        )
         self.settings_store.save(settings)
         self.current_settings = settings
 
@@ -122,7 +146,11 @@ class MainWindowController:
         os.startfile(str(output_dir.resolve()))
 
     def cleanup_remote_test_directories(self) -> None:
-        service = self.cleanup_service_factory() if self.cleanup_service_factory is not None else None
+        service = (
+            self.cleanup_service_factory()
+            if self.cleanup_service_factory is not None
+            else None
+        )
         if service is None:
             if self.current_refresh_service is None:
                 self.window.append_log("[WARN] 请先刷新网盘后再清理测试目录")
@@ -143,7 +171,10 @@ class MainWindowController:
         self.window.append_log(f"[INFO] 已扫描 {len(tasks)} 个一级子文件夹")
         self.window.append_log(f"[INFO] 可执行任务 {executable_count} 个")
         for task in tasks:
-            if task.status is FolderTaskStatus.SKIPPED and task.error_message == EMPTY_FOLDER_MESSAGE:
+            if (
+                task.status is FolderTaskStatus.SKIPPED
+                and task.error_message == EMPTY_FOLDER_MESSAGE
+            ):
                 self.window.append_log(f"[INFO] 跳过空目录：{task.local_name}")
         if skipped_count:
             self.window.append_log(f"[INFO] 已跳过 {skipped_count} 个空目录")
@@ -157,7 +188,10 @@ class MainWindowController:
         self.window.set_progress_summary(completed=0, total=total, failed=0)
         self.window.set_current_action("当前动作：等待上传")
         self.window.append_log(f"[INFO] 已选择单目标上传源：{task.local_name}")
-        if task.status is FolderTaskStatus.SKIPPED and task.error_message == EMPTY_FOLDER_MESSAGE:
+        if (
+            task.status is FolderTaskStatus.SKIPPED
+            and task.error_message == EMPTY_FOLDER_MESSAGE
+        ):
             self.window.append_log(f"[INFO] 跳过空目录：{task.local_name}")
 
     def refresh_drive(self) -> None:
@@ -193,7 +227,9 @@ class MainWindowController:
                 self.window,
             )
             if hasattr(dialog, "setWindowTitle"):
-                dialog.setWindowTitle(getattr(dialog, "windowTitle", lambda: "官方登录")())
+                dialog.setWindowTitle(
+                    getattr(dialog, "windowTitle", lambda: "官方登录")()
+                )
             if hasattr(dialog, "setModal"):
                 dialog.setModal(True)
             if hasattr(dialog, "raise_"):
@@ -251,11 +287,21 @@ class MainWindowController:
 
     def _build_worker_handle(self, plan):
         cancel_token = UploadCancellationToken()
+        shared_result_writer = ResultWriter(
+            resolve_runtime_path(self.current_settings.output_dir)
+        )
         if self.upload_worker_factory is not None:
             handle = self.upload_worker_factory(plan, self.upload_executor_factory)
             self.current_cancel_token = cancel_token
             return handle
-        worker = UploadWorker(plan=plan, executor_factory=self.upload_executor_factory, cancel_token=cancel_token)
+        worker = UploadWorker(
+            plan=plan,
+            executor_factory=self.upload_executor_factory,
+            cancel_token=cancel_token,
+            job_concurrency=self.current_settings.job_concurrency,
+            ui_update_interval_ms=self.current_settings.ui_update_interval_ms,
+            shared_result_writer=shared_result_writer,
+        )
         handle = UploadWorkerHandle(worker)
         worker.task_status.connect(self.window.update_task_status)
         worker.progress_summary.connect(self.window.set_progress_summary)
@@ -268,6 +314,10 @@ class MainWindowController:
     def _on_upload_run_finished(self, final_state: str) -> None:
         self.window.stop_button.setEnabled(False)
         self.window.start_button.setEnabled(True)
+        if hasattr(self.window, "set_upload_busy_state"):
+            self.window.set_upload_busy_state(False)
+        self.current_upload_handle = None
+        self.current_cancel_token = None
         if final_state == "stopped":
             self.window.append_log("[WARN] 上传已停止")
         elif final_state == "completed_with_errors":
@@ -279,6 +329,8 @@ class MainWindowController:
             return
         self.window.append_log("[WARN] 用户请求停止上传")
         self.window.set_current_action("当前动作：正在停止...")
+        if hasattr(self.window, "set_upload_busy_state"):
+            self.window.set_upload_busy_state(True, stopping=True)
         if hasattr(self.current_upload_handle, "request_stop"):
             self.current_upload_handle.request_stop()
         elif self.current_cancel_token is not None:
@@ -286,22 +338,36 @@ class MainWindowController:
         self.window.stop_button.setEnabled(False)
 
     def start_upload(self) -> None:
-        executable_count = sum(1 for task in self.current_folder_tasks if task.can_execute)
+        executable_count = sum(
+            1 for task in self.current_folder_tasks if task.can_execute
+        )
         if executable_count == 0:
-            warn_message = "[WARN] 当前没有可上传的子文件夹" if self.current_upload_mode is UploadMode.BATCH_SUBFOLDERS else "[WARN] 当前没有可上传的单目标"
+            warn_message = (
+                "[WARN] 当前没有可上传的子文件夹"
+                if self.current_upload_mode is UploadMode.BATCH_SUBFOLDERS
+                else "[WARN] 当前没有可上传的单目标"
+            )
             self.window.append_log(warn_message)
             return
         if not self.window.remote_folder_id:
             self.window.append_log("[WARN] 请先选择网盘目标目录")
             return
-        self.current_upload_plan = build_upload_plan(self.window.remote_folder_id, self.current_folder_tasks)
+        self.current_upload_plan = build_upload_plan(
+            self.window.remote_folder_id, self.current_folder_tasks
+        )
         total = len(self.current_upload_plan.jobs)
         if total == 0:
-            warn_message = "[WARN] 当前没有可上传的子文件夹" if self.current_upload_mode is UploadMode.BATCH_SUBFOLDERS else "[WARN] 当前没有可上传的单目标"
+            warn_message = (
+                "[WARN] 当前没有可上传的子文件夹"
+                if self.current_upload_mode is UploadMode.BATCH_SUBFOLDERS
+                else "[WARN] 当前没有可上传的单目标"
+            )
             self.window.append_log(warn_message)
             return
         for job in self.current_upload_plan.jobs:
-            self.window.update_task_status(job.local_name, FolderTaskStatus.UPLOADING.value)
+            self.window.update_task_status(
+                job.local_name, FolderTaskStatus.UPLOADING.value
+            )
         self.window.set_progress_summary(completed=0, total=total, failed=0)
         if self.current_upload_mode is UploadMode.BATCH_SUBFOLDERS:
             self.window.append_log(
@@ -313,10 +379,14 @@ class MainWindowController:
             )
         self.window.start_button.setEnabled(False)
         self.window.stop_button.setEnabled(True)
+        if hasattr(self.window, "set_upload_busy_state"):
+            self.window.set_upload_busy_state(True)
         if self.upload_executor_factory is None:
             return
         if self.use_async_upload:
-            self.current_upload_handle = self._build_worker_handle(self.current_upload_plan)
+            self.current_upload_handle = self._build_worker_handle(
+                self.current_upload_plan
+            )
             self.current_upload_handle.start()
             return
 
@@ -325,28 +395,46 @@ class MainWindowController:
         completed = 0
         for job in self.current_upload_plan.jobs:
             self.window.set_current_action(f"当前任务：{job.local_name}")
-            status_callback = lambda status, share_url="", retry_count=0, local_name=job.local_name: self.window.update_task_status(
-                local_name,
-                status,
-                share_url,
-                retry_count,
+            status_callback = (
+                lambda status,
+                share_url="",
+                retry_count=0,
+                local_name=job.local_name: self.window.update_task_status(
+                    local_name,
+                    status,
+                    share_url,
+                    retry_count,
+                )
             )
             try:
-                result = call_with_supported_kwargs(executor.execute_job, job, status_callback=status_callback)
+                result = call_with_supported_kwargs(
+                    executor.execute_job, job, status_callback=status_callback
+                )
             except Exception as exc:
                 failed += 1
-                self.window.update_task_status(job.local_name, FolderTaskStatus.FAILED.value)
+                self.window.update_task_status(
+                    job.local_name, FolderTaskStatus.FAILED.value
+                )
                 self.window.append_log(f"[ERROR] 上传失败：{job.local_name} -> {exc}")
-                self.window.set_progress_summary(completed=completed, total=total, failed=failed)
+                self.window.set_progress_summary(
+                    completed=completed, total=total, failed=failed
+                )
                 continue
             completed += 1
-            self.window.update_task_status(job.local_name, getattr(result, 'status', FolderTaskStatus.COMPLETED.value), getattr(result, 'share_url', ''), retry_count=getattr(result, 'retry_count', 0))
+            self.window.update_task_status(
+                job.local_name,
+                getattr(result, "status", FolderTaskStatus.COMPLETED.value),
+                getattr(result, "share_url", ""),
+                retry_count=getattr(result, "retry_count", 0),
+            )
             self.window.append_log(
                 f"[INFO] 上传骨架执行完成：{job.local_name} ({result.uploaded_files} 文件)"
             )
             if getattr(result, "share_url", ""):
                 self.window.append_log(f"[INFO] 分享链接：{result.share_url}")
-            self.window.set_progress_summary(completed=completed, total=total, failed=failed)
+            self.window.set_progress_summary(
+                completed=completed, total=total, failed=failed
+            )
         self.window.set_current_action("当前动作：空闲")
         self.window.stop_button.setEnabled(False)
         self.window.start_button.setEnabled(True)

@@ -14,6 +14,7 @@
 2. 完成自检后再提交
 3. 在提交说明中明确变更目的与范围
 4. 如涉及 UI 或行为变化，请同步更新 README 或相关公开文档
+5. 如涉及上传并发、结果写入或 UI 刷新逻辑，请补充对应测试与验证清单
 
 ## 安全与隐私
 
@@ -23,5 +24,15 @@
 - `.env` 文件
 - 本地绝对路径或用户目录信息
 - 调试日志、输出结果、打包产物
+
+## 并发与性能验证
+
+涉及上传链路、日志刷新、任务表更新或登录状态流的修改时，请至少执行：
+
+- `pytest -v`
+- `pytest tests/integration/test_upload_benchmark_smoke.py -v`
+- `python scripts/benchmark_upload_modes.py`
+
+如修改了 PySide6 交互，请额外确认主窗口与登录弹窗的 hover / focus / busy 反馈一致。
 
 如需报告安全问题，请优先阅读 [SECURITY.md](./SECURITY.md)。

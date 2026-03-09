@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFontDatabase, QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -24,7 +24,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from quark_uploader.models import AccountSummary, FolderTask, RemoteFolderNode, UploadMode
+from quark_uploader.models import (
+    AccountSummary,
+    FolderTask,
+    RemoteFolderNode,
+    UploadMode,
+)
 from quark_uploader.paths import get_icon_path
 
 
@@ -34,6 +39,9 @@ class MainWindow(QWidget):
         self.cookie_valid = False
         self.local_root = ""
         self.remote_folder_id = ""
+        self._pending_log_messages: list[str] = []
+        self._task_row_lookup: dict[str, int] = {}
+        self._last_progress_snapshot: tuple[int, int, int] | None = None
 
         self.cookie_input = QLineEdit()
         self.cookie_input.setPlaceholderText("请粘贴 Cookie，或点击‘官方登录’")
@@ -58,7 +66,9 @@ class MainWindow(QWidget):
         self.remote_tree = QTreeWidget()
         self.remote_tree.setHeaderLabels(["网盘目录", "FID"])
         self.task_table = QTableWidget(0, 6)
-        self.task_table.setHorizontalHeaderLabels(["任务名称", "文件数", "总大小", "状态", "分享链接", "重试"])
+        self.task_table.setHorizontalHeaderLabels(
+            ["任务名称", "文件数", "总大小", "状态", "分享链接", "重试"]
+        )
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.start_button.setEnabled(False)
@@ -81,14 +91,16 @@ class MainWindow(QWidget):
         self.upload_mode_batch_button.setChecked(True)
         self.selected_remote_label.setObjectName("selectedRemoteLabel")
 
-        self.summary_card, self.summary_layout, self.summary_card_title = self._create_card(
-            "summaryCard", "任务摘要", "当前连接与执行状态"
+        self.summary_card, self.summary_layout, self.summary_card_title = (
+            self._create_card("summaryCard", "任务摘要", "当前连接与执行状态")
         )
-        self.controls_card, self.controls_layout, self.controls_card_title = self._create_card(
-            "controlsCard", "操作区", "连接账号、选择本地目录并控制任务"
+        self.controls_card, self.controls_layout, self.controls_card_title = (
+            self._create_card(
+                "controlsCard", "操作区", "连接账号、选择本地目录并控制任务"
+            )
         )
-        self.remote_card, self.remote_layout, self.remote_section_title = self._create_card(
-            "remoteCard", "目标网盘目录", "选择上传目标目录"
+        self.remote_card, self.remote_layout, self.remote_section_title = (
+            self._create_card("remoteCard", "目标网盘目录", "选择上传目标目录")
         )
         self.task_card, self.task_layout, self.task_section_title = self._create_card(
             "taskCard", "上传任务", "查看每个一级子文件夹的执行状态"
@@ -97,10 +109,15 @@ class MainWindow(QWidget):
             "logCard", "运行日志", "记录刷新、上传、分享与重试信息"
         )
         self.workspace_tabs = QTabWidget()
+        self.log_flush_timer = QTimer(self)
+        self.log_flush_timer.setInterval(120)
+        self.log_flush_timer.timeout.connect(self._flush_log_buffer)
         self.controls_scroll = QScrollArea()
         self.controls_scroll.setWidgetResizable(True)
         self.controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.controls_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         self.controls_body = QWidget()
         self.controls_body_layout = QVBoxLayout(self.controls_body)
         self.controls_body_layout.setContentsMargins(0, 0, 0, 0)
@@ -123,7 +140,9 @@ class MainWindow(QWidget):
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
 
-    def _create_card(self, object_name: str, title: str, subtitle: str) -> tuple[QFrame, QVBoxLayout, QLabel]:
+    def _create_card(
+        self, object_name: str, title: str, subtitle: str
+    ) -> tuple[QFrame, QVBoxLayout, QLabel]:
         card = QFrame()
         card.setObjectName(object_name)
         card.setProperty("card", True)
@@ -147,7 +166,9 @@ class MainWindow(QWidget):
         if subtitle is not None:
             subtitle.hide()
 
-    def _create_operation_panel(self, object_name: str, title: str) -> tuple[QFrame, QVBoxLayout]:
+    def _create_operation_panel(
+        self, object_name: str, title: str
+    ) -> tuple[QFrame, QVBoxLayout]:
         panel = QFrame()
         panel.setObjectName(object_name)
         panel.setProperty("operationPanel", True)
@@ -212,20 +233,36 @@ class MainWindow(QWidget):
         self.workspace_tabs.setMovable(False)
         self.workspace_tabs.setUsesScrollButtons(False)
         self.workspace_tabs.setTabPosition(QTabWidget.TabPosition.North)
-        self.workspace_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.workspace_tabs.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
 
-        self.controls_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        self.summary_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        self.controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.controls_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.controls_card.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        self.summary_card.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        self.controls_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.controls_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         self.log_output.setMinimumHeight(0)
         self.log_output.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.log_output.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.log_output.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
         self.log_output.setMaximumBlockCount(1000)
         self.log_output.setCenterOnScroll(False)
         self.log_output.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.log_output.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.log_output.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.log_output.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self.log_output.setFont(
+            QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        )
         self.remote_tree.setUniformRowHeights(True)
         self.task_table.setWordWrap(False)
         self.task_table.verticalHeader().setDefaultSectionSize(32)
@@ -254,7 +291,9 @@ class MainWindow(QWidget):
         self.controls_layout.addWidget(self.summary_card)
         self.controls_layout.addWidget(self.controls_scroll)
 
-        connection_panel, connection_layout = self._create_operation_panel("connectionPanel", "账号连接")
+        connection_panel, connection_layout = self._create_operation_panel(
+            "connectionPanel", "账号连接"
+        )
         connection_layout.addWidget(self.cookie_input)
         auth_button_row = QHBoxLayout()
         auth_button_row.setSpacing(8)
@@ -264,7 +303,9 @@ class MainWindow(QWidget):
         connection_layout.addWidget(self.remember_cookie_checkbox)
         connection_layout.addStretch(1)
 
-        source_panel, source_layout = self._create_operation_panel("sourcePanel", "上传来源")
+        source_panel, source_layout = self._create_operation_panel(
+            "sourcePanel", "上传来源"
+        )
         source_layout.addWidget(self.upload_mode_section_label)
         upload_mode_row = QHBoxLayout()
         upload_mode_row.setSpacing(8)
@@ -284,7 +325,9 @@ class MainWindow(QWidget):
         source_layout.addLayout(self.single_target_button_row)
         source_layout.addStretch(1)
 
-        action_panel, action_layout = self._create_operation_panel("actionPanel", "任务执行")
+        action_panel, action_layout = self._create_operation_panel(
+            "actionPanel", "任务执行"
+        )
         action_hint_label = QLabel("确认本地来源与目标目录后开始上传任务。")
         action_hint_label.setObjectName("panelHint")
         action_hint_label.setWordWrap(True)
@@ -327,7 +370,7 @@ class MainWindow(QWidget):
         return label
 
     def _apply_styles(self) -> None:
-        self.setStyleSheet('''
+        self.setStyleSheet("""
             QWidget#rootWidget {
                 background: #f3f6fb;
                 color: #1f2937;
@@ -418,16 +461,33 @@ class MainWindow(QWidget):
                 color: #b91c1c;
                 border: 1px solid #fca5a5;
             }
+            QLabel#statusChip[state="busy"] {
+                background: #eff6ff;
+                color: #1d4ed8;
+                border: 1px solid #93c5fd;
+            }
             QLineEdit, QTreeWidget, QTableWidget, QPlainTextEdit {
                 background: #fbfdff;
                 border: 1px solid #cfd8e3;
                 border-radius: 10px;
                 padding: 6px 8px;
             }
+            QLineEdit:hover, QTreeWidget:hover, QTableWidget:hover, QPlainTextEdit:hover {
+                border: 1px solid #93c5fd;
+                background: #ffffff;
+            }
+            QLineEdit:focus, QTreeWidget:focus, QTableWidget:focus, QPlainTextEdit:focus {
+                border: 1px solid #2563eb;
+                background: #ffffff;
+            }
             QTreeWidget, QTableWidget, QPlainTextEdit {
                 gridline-color: #e2e8f0;
                 selection-background-color: #dbeafe;
                 selection-color: #0f172a;
+            }
+            QTreeWidget::item:selected, QTableWidget::item:selected {
+                background: #dbeafe;
+                color: #0f172a;
             }
             QHeaderView::section {
                 background: #f8fafc;
@@ -447,6 +507,9 @@ class MainWindow(QWidget):
             }
             QPushButton:hover {
                 background: #f1f5f9;
+            }
+            QPushButton:focus {
+                border: 1px solid #2563eb;
             }
             QPushButton#secondaryButton {
                 background: #ffffff;
@@ -479,6 +542,11 @@ class MainWindow(QWidget):
             }
             QPushButton#dangerButton:hover {
                 background: #ffedd5;
+            }
+            QPushButton[busy="true"] {
+                background: #dbeafe;
+                color: #1d4ed8;
+                border: 1px solid #60a5fa;
             }
             QPushButton#primaryButton,
             QPushButton#dangerButton {
@@ -528,7 +596,7 @@ class MainWindow(QWidget):
                 color: #334155;
                 font-size: 11px;
             }
-        ''')
+        """)
 
     def recompute_start_enabled(self) -> None:
         ready = bool(self.cookie_valid and self.local_root and self.remote_folder_id)
@@ -545,14 +613,24 @@ class MainWindow(QWidget):
         self.recompute_start_enabled()
 
     def set_progress_summary(self, completed: int, total: int, failed: int) -> None:
-        self.progress_summary_label.setText(f"任务进度：{completed}/{total}，失败 {failed}")
-        self.overall_progress_bar.setValue(0 if total == 0 else int(completed / total * 100))
+        snapshot = (completed, total, failed)
+        if snapshot == self._last_progress_snapshot:
+            return
+        self._last_progress_snapshot = snapshot
+        self.progress_summary_label.setText(
+            f"任务进度：{completed}/{total}，失败 {failed}"
+        )
+        self.overall_progress_bar.setValue(
+            0 if total == 0 else int(completed / total * 100)
+        )
 
     def set_current_action(self, text: str) -> None:
         self.current_action_label.setText(text)
 
     def set_selected_remote_folder(self, path: str | None) -> None:
-        self.selected_remote_label.setText(f"当前选择：{path}" if path else "当前选择：未选择")
+        self.selected_remote_label.setText(
+            f"当前选择：{path}" if path else "当前选择：未选择"
+        )
 
     def set_upload_mode(self, mode: str) -> None:
         is_batch = mode == UploadMode.BATCH_SUBFOLDERS.value
@@ -566,6 +644,15 @@ class MainWindow(QWidget):
         self.status_label.setProperty("state", state)
         self.style().unpolish(self.status_label)
         self.style().polish(self.status_label)
+
+    def _refresh_button_state(self, button: QPushButton, busy: bool) -> None:
+        button.setProperty("busy", busy)
+        self.style().unpolish(button)
+        self.style().polish(button)
+
+    def set_upload_busy_state(self, active: bool, stopping: bool = False) -> None:
+        self._refresh_button_state(self.start_button, active and not stopping)
+        self._refresh_button_state(self.stop_button, active and stopping)
 
     def set_connection_state(self, connected: bool, message: str) -> None:
         self.cookie_valid = connected
@@ -604,26 +691,64 @@ class MainWindow(QWidget):
             item.setForeground(self._status_color(status))
 
     def populate_task_table(self, tasks: list[FolderTask]) -> None:
+        self._task_row_lookup.clear()
         self.task_table.setRowCount(len(tasks))
         for row_index, task in enumerate(tasks):
+            self._task_row_lookup[task.local_name] = row_index
             self.task_table.setItem(row_index, 0, QTableWidgetItem(task.local_name))
-            self.task_table.setItem(row_index, 1, QTableWidgetItem(str(task.file_count)))
-            self.task_table.setItem(row_index, 2, QTableWidgetItem(str(task.total_size)))
+            self.task_table.setItem(
+                row_index, 1, QTableWidgetItem(str(task.file_count))
+            )
+            self.task_table.setItem(
+                row_index, 2, QTableWidgetItem(str(task.total_size))
+            )
             self.task_table.setItem(row_index, 3, QTableWidgetItem(task.status.value))
-            self.task_table.setItem(row_index, 4, QTableWidgetItem(task.share_url or ""))
+            self.task_table.setItem(
+                row_index, 4, QTableWidgetItem(task.share_url or "")
+            )
             self.task_table.setItem(row_index, 5, QTableWidgetItem("0"))
             self._style_task_row(row_index, task.status.value)
 
-    def update_task_status(self, local_name: str, status: str, share_url: str = "", retry_count: int = 0) -> None:
-        for row_index in range(self.task_table.rowCount()):
-            name_item = self.task_table.item(row_index, 0)
-            if name_item and name_item.text() == local_name:
-                self.task_table.setItem(row_index, 3, QTableWidgetItem(status))
-                self.task_table.setItem(row_index, 5, QTableWidgetItem(str(retry_count)))
-                if share_url:
-                    self.task_table.setItem(row_index, 4, QTableWidgetItem(share_url))
-                self._style_task_row(row_index, status)
-                break
+    def _update_table_item_text(
+        self, row_index: int, column_index: int, text: str
+    ) -> None:
+        item = self.task_table.item(row_index, column_index)
+        if item is None:
+            self.task_table.setItem(row_index, column_index, QTableWidgetItem(text))
+            return
+        if item.text() != text:
+            item.setText(text)
+
+    def update_task_status(
+        self, local_name: str, status: str, share_url: str = "", retry_count: int = 0
+    ) -> None:
+        row_index = self._task_row_lookup.get(local_name)
+        if row_index is None:
+            for row_index in range(self.task_table.rowCount()):
+                name_item = self.task_table.item(row_index, 0)
+                if name_item and name_item.text() == local_name:
+                    self._task_row_lookup[local_name] = row_index
+                    break
+            else:
+                return
+        status_item = self.task_table.item(row_index, 3)
+        retry_item = self.task_table.item(row_index, 5)
+        share_item = self.task_table.item(row_index, 4)
+        if (
+            status_item is not None
+            and status_item.text() == status
+            and retry_item is not None
+            and retry_item.text() == str(retry_count)
+        ):
+            if not share_url or (
+                share_item is not None and share_item.text() == share_url
+            ):
+                return
+        self._update_table_item_text(row_index, 3, status)
+        self._update_table_item_text(row_index, 5, str(retry_count))
+        if share_url:
+            self._update_table_item_text(row_index, 4, share_url)
+        self._style_task_row(row_index, status)
 
     def populate_remote_tree(self, nodes: list[RemoteFolderNode]) -> None:
         self.remote_tree.clear()
@@ -637,4 +762,20 @@ class MainWindow(QWidget):
             self.remote_tree.addTopLevelItem(item)
 
     def append_log(self, message: str) -> None:
-        self.log_output.appendPlainText(message)
+        if not message:
+            return
+        self._pending_log_messages.append(message)
+        if len(self._pending_log_messages) >= 8:
+            self._flush_log_buffer()
+            return
+        if not self.log_flush_timer.isActive():
+            self.log_flush_timer.start()
+
+    def _flush_log_buffer(self) -> None:
+        if not self._pending_log_messages:
+            self.log_flush_timer.stop()
+            return
+        buffered = self._pending_log_messages[:]
+        self._pending_log_messages.clear()
+        self.log_output.appendPlainText("\n".join(buffered))
+        self.log_flush_timer.stop()
