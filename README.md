@@ -11,13 +11,12 @@
 
 ### Windows 预构建包
 
-- [下载 Windows x64 免安装包（ZIP）](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.1.0/quark_uploader-windows-x64-v0.1.0.zip)
-- [下载 SHA256 校验文件](https://github.com/luxiaosen8/quark-pan-uploader/releases/download/v0.1.0/quark_uploader-windows-x64-v0.1.0.sha256.txt)
-- [查看完整 Release 页面](https://github.com/luxiaosen8/quark-pan-uploader/releases/tag/v0.1.0)
+- [查看最新 Release 页面](https://github.com/luxiaosen8/quark-pan-uploader/releases/latest)
+- [查看全部历史版本](https://github.com/luxiaosen8/quark-pan-uploader/releases)
 
 ### 使用方式
 
-1. 下载并解压 `quark_uploader-windows-x64-v0.1.0.zip`
+1. 从最新 Release 页面下载并解压 Windows ZIP 包
 2. 运行 `quark_uploader.exe`
 3. 首次启动后，程序会在本地自动创建 `output/` 与 `.local/` 目录
 
@@ -31,10 +30,12 @@
 
 - **批量子文件夹上传**：扫描本地根目录下一级子文件夹并逐项执行上传
 - **单目标上传**：支持直接上传单个文件夹或单个文件
+- **受控并发上传**：默认启用任务级并发与 multipart 分片并发，兼顾吞吐和稳定性
 - **远端目录选择**：刷新并浏览夸克网盘目录树，选择上传目标位置
 - **分享链接生成**：上传完成后自动为远端项目创建分享链接
 - **结构化输出**：生成结果汇总、运行归档与日志输出目录
 - **桌面化工作台 UI**：上栏操作区 + 下栏标签页工作区，适合持续操作与结果查看
+- **统一交互反馈**：主窗口与官方登录弹窗补齐 hover / focus / disabled / busy 状态
 
 ## 快速开始
 
@@ -107,6 +108,14 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 
 这些目录会在运行时自动创建，属于本地运行产物，不应提交到版本控制。
 
+当前版本额外支持以下本地配置项：
+
+- `job_concurrency`：任务级并发数，默认 `2`
+- `part_concurrency`：分片级并发数，默认 `3`
+- `ui_update_interval_ms`：UI 聚合刷新间隔，默认 `120`
+
+以上配置第一阶段仅写入本地设置，不在主界面暴露。
+
 ## 安全说明
 
 - 不要提交真实 Cookie、Token、`.env`、日志或输出目录内容
@@ -125,7 +134,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 
 - 仓库地址：[luxiaosen8/quark-pan-uploader](https://github.com/luxiaosen8/quark-pan-uploader)
 - 最新发布：[Releases](https://github.com/luxiaosen8/quark-pan-uploader/releases)
-- 首个公开版本：[`v0.1.0`](https://github.com/luxiaosen8/quark-pan-uploader/releases/tag/v0.1.0)
+- 当前源码版本：`v0.2.0`
 
 ## 协作
 
