@@ -7,7 +7,10 @@ from time import sleep
 from pydantic import BaseModel
 
 from quark_uploader.models import FolderTaskStatus, TaskSourceType
-from quark_uploader.services.cancellation import UploadCancellationToken, UploadCancelled
+from quark_uploader.services.cancellation import (
+    UploadCancellationToken,
+    UploadCancelled,
+)
 from quark_uploader.services.invoke import call_with_supported_kwargs
 from quark_uploader.services.remote_directory_sync import ResolvedRemoteDirectory
 from quark_uploader.services.upload_workflow import UploadJob
@@ -54,7 +57,9 @@ class UploadExecutionEngine:
         if self.logger is not None:
             self.logger(message)
 
-    def _append_event(self, level: str, phase: str, message: str, **extra: object) -> None:
+    def _append_event(
+        self, level: str, phase: str, message: str, **extra: object
+    ) -> None:
         if self.result_writer is not None:
             self.result_writer.append_event(level, phase, message, **extra)
 
@@ -63,20 +68,34 @@ class UploadExecutionEngine:
         if delay > 0:
             self.sleep_fn(delay)
 
-    def execute_job(self, job: UploadJob, cancel_token: UploadCancellationToken | None = None, progress_callback=None, status_callback=None) -> UploadExecutionResult:
+    def execute_job(
+        self,
+        job: UploadJob,
+        cancel_token: UploadCancellationToken | None = None,
+        progress_callback=None,
+        status_callback=None,
+    ) -> UploadExecutionResult:
         started_at = datetime.now().isoformat()
         retry_count = 0
         uploaded_files = 0
         root_folder_fid = ""
         remote_item_fid = ""
-        self._append_event("INFO", "job", "job start", folder_name=job.local_name, total_files=len(job.file_entries))
+        self._append_event(
+            "INFO",
+            "job",
+            "job start",
+            folder_name=job.local_name,
+            total_files=len(job.file_entries),
+        )
         if status_callback is not None:
             status_callback(FolderTaskStatus.UPLOADING.value, retry_count=retry_count)
         try:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
             if job.source_type is TaskSourceType.FILE:
-                resolved = ResolvedRemoteDirectory(root_folder_fid=job.remote_parent_fid)
+                resolved = ResolvedRemoteDirectory(
+                    root_folder_fid=job.remote_parent_fid
+                )
                 root_folder_fid = job.remote_parent_fid
             else:
                 resolved = self.directory_sync_service.ensure_job_directories(job)
@@ -84,7 +103,9 @@ class UploadExecutionEngine:
                 remote_item_fid = root_folder_fid
 
             for entry in job.file_entries:
-                parent_fid = self._resolve_target_parent_fid(entry.relative_path, resolved)
+                parent_fid = self._resolve_target_parent_fid(
+                    entry.relative_path, resolved
+                )
                 attempts = 0
                 while True:
                     if cancel_token is not None:
@@ -99,9 +120,16 @@ class UploadExecutionEngine:
                         )
                         uploaded_files += 1
                         if job.source_type is TaskSourceType.FILE:
-                            remote_item_fid = str(upload_result.get("finish", {}).get("data", {}).get("fid", ""))
+                            remote_item_fid = str(
+                                upload_result.get("finish", {})
+                                .get("data", {})
+                                .get("fid", "")
+                            )
                         if status_callback is not None:
-                            status_callback(FolderTaskStatus.UPLOADING.value, retry_count=retry_count)
+                            status_callback(
+                                FolderTaskStatus.UPLOADING.value,
+                                retry_count=retry_count,
+                            )
                         break
                     except UploadCancelled:
                         raise
@@ -111,23 +139,42 @@ class UploadExecutionEngine:
                         attempts += 1
                         retry_count += 1
                         if status_callback is not None:
-                            status_callback(FolderTaskStatus.RETRYING.value, retry_count=retry_count)
-                        self._log(f"[WARN] 重试上传文件：file={entry.relative_path} attempt={attempts} error={exc}")
-                        self._append_event("WARN", "upload", "retry file upload", file_name=entry.relative_path, attempt=attempts, error=str(exc))
+                            status_callback(
+                                FolderTaskStatus.RETRYING.value, retry_count=retry_count
+                            )
+                        self._log(
+                            f"[WARN] 重试上传文件：job={job.local_name} file={entry.relative_path} attempt={attempts} error={exc}"
+                        )
+                        self._append_event(
+                            "WARN",
+                            "upload",
+                            "retry file upload",
+                            folder_name=job.local_name,
+                            file_name=entry.relative_path,
+                            attempt=attempts,
+                            retry_count=retry_count,
+                            error=str(exc),
+                        )
                         self._sleep_for_retry(attempts)
 
             share_id = ""
             share_url = ""
             if self.share_service is not None:
                 if status_callback is not None:
-                    status_callback(FolderTaskStatus.SHARING.value, retry_count=retry_count)
+                    status_callback(
+                        FolderTaskStatus.SHARING.value, retry_count=retry_count
+                    )
                 share_attempt = 0
                 while True:
                     if cancel_token is not None:
                         cancel_token.raise_if_cancelled()
                     try:
                         share_target_fid = remote_item_fid or resolved.root_folder_fid
-                        share_callable = self.share_service.create_share_for_item if job.source_type is TaskSourceType.FILE else self.share_service.create_share_for_folder
+                        share_callable = (
+                            self.share_service.create_share_for_item
+                            if job.source_type is TaskSourceType.FILE
+                            else self.share_service.create_share_for_folder
+                        )
                         share_result = call_with_supported_kwargs(
                             share_callable,
                             fid=share_target_fid,
@@ -145,12 +192,26 @@ class UploadExecutionEngine:
                         share_attempt += 1
                         retry_count += 1
                         if status_callback is not None:
-                            status_callback(FolderTaskStatus.RETRYING.value, retry_count=retry_count)
-                        self._log(f"[WARN] 重试创建分享：folder={job.local_name} attempt={share_attempt} error={exc}")
-                        self._append_event("WARN", "share", "retry share creation", folder_name=job.local_name, attempt=share_attempt, error=str(exc))
+                            status_callback(
+                                FolderTaskStatus.RETRYING.value, retry_count=retry_count
+                            )
+                        self._log(
+                            f"[WARN] 重试创建分享：folder={job.local_name} attempt={share_attempt} error={exc}"
+                        )
+                        self._append_event(
+                            "WARN",
+                            "share",
+                            "retry share creation",
+                            folder_name=job.local_name,
+                            attempt=share_attempt,
+                            retry_count=retry_count,
+                            error=str(exc),
+                        )
                         self._sleep_for_retry(share_attempt)
                         if status_callback is not None:
-                            status_callback(FolderTaskStatus.SHARING.value, retry_count=retry_count)
+                            status_callback(
+                                FolderTaskStatus.SHARING.value, retry_count=retry_count
+                            )
 
             result = UploadExecutionResult(
                 root_folder_fid=root_folder_fid,
@@ -164,7 +225,14 @@ class UploadExecutionEngine:
                 started_at=started_at,
                 finished_at=datetime.now().isoformat(),
             )
-            self._append_event("INFO", "job", "job completed", folder_name=job.local_name, uploaded_files=result.uploaded_files, share_url=result.share_url)
+            self._append_event(
+                "INFO",
+                "job",
+                "job completed",
+                folder_name=job.local_name,
+                uploaded_files=result.uploaded_files,
+                share_url=result.share_url,
+            )
             self._write_result(job, result)
             return result
         except UploadCancelled as exc:
@@ -179,7 +247,13 @@ class UploadExecutionEngine:
                 started_at=started_at,
                 finished_at=datetime.now().isoformat(),
             )
-            self._append_event("WARN", "job", "job stopped", folder_name=job.local_name, error=result.error_message)
+            self._append_event(
+                "WARN",
+                "job",
+                "job stopped",
+                folder_name=job.local_name,
+                error=result.error_message,
+            )
             self._write_result(job, result)
             return result
         except Exception as exc:
@@ -194,37 +268,47 @@ class UploadExecutionEngine:
                 started_at=started_at,
                 finished_at=datetime.now().isoformat(),
             )
-            self._append_event("ERROR", "job", "job failed", folder_name=job.local_name, error=result.error_message)
+            self._append_event(
+                "ERROR",
+                "job",
+                "job failed",
+                folder_name=job.local_name,
+                error=result.error_message,
+            )
             self._write_result(job, result)
             raise
 
     def _write_result(self, job: UploadJob, result: UploadExecutionResult) -> None:
         if self.result_writer is None:
             return
-        self.result_writer.append_share_result({
-            "run_id": self.result_writer.run_id,
-            "local_folder_name": job.local_name,
-            "local_folder_path": job.local_path,
-            "remote_folder_name": job.local_name,
-            "remote_parent_fid": job.remote_parent_fid,
-            "remote_folder_fid": result.root_folder_fid,
-            "remote_root_fid": result.root_folder_fid,
-            "remote_item_fid": result.remote_item_fid,
-            "remote_item_type": result.remote_item_type,
-            "total_files": len(job.file_entries),
-            "uploaded_files": result.uploaded_files,
-            "share_id": result.share_id,
-            "share_url": result.share_url,
-            "status": result.status,
-            "retry_count": result.retry_count,
-            "error_message": result.error_message,
-            "created_at": result.finished_at,
-            "started_at": result.started_at,
-            "finished_at": result.finished_at,
-        })
+        self.result_writer.append_share_result(
+            {
+                "run_id": self.result_writer.run_id,
+                "local_folder_name": job.local_name,
+                "local_folder_path": job.local_path,
+                "remote_folder_name": job.local_name,
+                "remote_parent_fid": job.remote_parent_fid,
+                "remote_folder_fid": result.root_folder_fid,
+                "remote_root_fid": result.root_folder_fid,
+                "remote_item_fid": result.remote_item_fid,
+                "remote_item_type": result.remote_item_type,
+                "total_files": len(job.file_entries),
+                "uploaded_files": result.uploaded_files,
+                "share_id": result.share_id,
+                "share_url": result.share_url,
+                "status": result.status,
+                "retry_count": result.retry_count,
+                "error_message": result.error_message,
+                "created_at": result.finished_at,
+                "started_at": result.started_at,
+                "finished_at": result.finished_at,
+            }
+        )
 
-    def _resolve_target_parent_fid(self, relative_path: str, resolved: ResolvedRemoteDirectory) -> str:
+    def _resolve_target_parent_fid(
+        self, relative_path: str, resolved: ResolvedRemoteDirectory
+    ) -> str:
         parent_dir = PurePosixPath(relative_path).parent.as_posix()
-        if parent_dir in {'.', ''}:
+        if parent_dir in {".", ""}:
             return resolved.root_folder_fid
         return resolved.relative_dir_fids[parent_dir]
