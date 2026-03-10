@@ -17,3 +17,4 @@ custom-output/
 bootstrap_trace.log
 AGENTS.md
 docs/plans/
+.agent/

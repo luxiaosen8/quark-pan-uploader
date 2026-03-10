@@ -91,8 +91,10 @@ class UploadWorker(QObject):
             buffered = self._pending_logs[:]
             self._pending_logs.clear()
             self._last_log_emit = now
-        for message in buffered:
-            self.log_message.emit(message)
+        if len(buffered) == 1:
+            self.log_message.emit(buffered[0])
+        else:
+            self.log_message.emit("\n".join(buffered))
 
     def _emit_progress_action(self, payload: dict) -> None:
         file_name = payload.get("file_name", "")

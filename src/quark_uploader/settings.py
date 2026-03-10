@@ -5,6 +5,8 @@ from pydantic import BaseModel
 
 DEFAULT_JOB_CONCURRENCY = 2
 MAX_JOB_CONCURRENCY = 4
+DEFAULT_FILE_CONCURRENCY = 2
+MAX_FILE_CONCURRENCY = 6
 DEFAULT_PART_CONCURRENCY = 3
 MAX_PART_CONCURRENCY = 6
 DEFAULT_UI_UPDATE_INTERVAL_MS = 120
@@ -46,6 +48,7 @@ class AppSettings(BaseModel):
     share_poll_interval_seconds: float = 0.5
     debug_mode: bool = False
     job_concurrency: int = DEFAULT_JOB_CONCURRENCY
+    file_concurrency: int = DEFAULT_FILE_CONCURRENCY
     part_concurrency: int = DEFAULT_PART_CONCURRENCY
     ui_update_interval_ms: int = DEFAULT_UI_UPDATE_INTERVAL_MS
 
@@ -66,6 +69,9 @@ class AppSettings(BaseModel):
         )
         self.job_concurrency = _clamp_int(
             self.job_concurrency, DEFAULT_JOB_CONCURRENCY, 1, MAX_JOB_CONCURRENCY
+        )
+        self.file_concurrency = _clamp_int(
+            self.file_concurrency, DEFAULT_FILE_CONCURRENCY, 1, MAX_FILE_CONCURRENCY
         )
         self.part_concurrency = _clamp_int(
             self.part_concurrency, DEFAULT_PART_CONCURRENCY, 1, MAX_PART_CONCURRENCY

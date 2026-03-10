@@ -16,8 +16,11 @@ def test_benchmark_script_runs_and_reports_expected_sections() -> None:
     report = module.run_benchmark_suite()
 
     assert set(report.keys()) == {"serial", "concurrent"}
-    assert "small" in report["serial"]
+    assert set(report["serial"].keys()) == set(report["concurrent"].keys())
+    assert report["serial"]["small"]["total_bytes"] > 0
+    assert report["serial"]["small"]["parts"] >= 1
     assert (
         report["concurrent"]["small"]["duration_seconds"]
         < report["serial"]["small"]["duration_seconds"]
     )
+    assert report["concurrent"]["large"]["average_parts_per_second"] > 0

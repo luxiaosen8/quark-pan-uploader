@@ -113,6 +113,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 当前版本额外支持以下本地配置项：
 
 - `job_concurrency`：任务级并发数，默认 `2`
+- `file_concurrency`：单任务内文件并发数，默认 `2`
 - `part_concurrency`：分片级并发数，默认 `3`
 - `ui_update_interval_ms`：UI 聚合刷新间隔，默认 `120`
 

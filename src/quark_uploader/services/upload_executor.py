@@ -42,6 +42,7 @@ class UploadExecutionEngine:
         share_retry_limit: int = 1,
         retry_backoff_base_seconds: float = 0.0,
         sleep_fn=sleep,
+        file_concurrency: int = 1,
     ) -> None:
         self.directory_sync_service = directory_sync_service
         self.uploader = uploader
@@ -52,6 +53,7 @@ class UploadExecutionEngine:
         self.share_retry_limit = share_retry_limit
         self.retry_backoff_base_seconds = retry_backoff_base_seconds
         self.sleep_fn = sleep_fn
+        self.file_concurrency = max(1, int(file_concurrency))
 
     def _log(self, message: str) -> None:
         if self.logger is not None:
@@ -102,60 +104,153 @@ class UploadExecutionEngine:
                 root_folder_fid = resolved.root_folder_fid
                 remote_item_fid = root_folder_fid
 
-            for entry in job.file_entries:
-                parent_fid = self._resolve_target_parent_fid(
-                    entry.relative_path, resolved
-                )
-                attempts = 0
-                while True:
-                    if cancel_token is not None:
-                        cancel_token.raise_if_cancelled()
-                    try:
-                        upload_result = call_with_supported_kwargs(
-                            self.uploader.upload_file,
-                            entry,
-                            parent_fid,
-                            cancel_token=cancel_token,
-                            progress_callback=progress_callback,
-                        )
-                        uploaded_files += 1
-                        if job.source_type is TaskSourceType.FILE:
-                            remote_item_fid = str(
-                                upload_result.get("finish", {})
-                                .get("data", {})
-                                .get("fid", "")
+            if self.file_concurrency <= 1 or len(job.file_entries) <= 1:
+                for entry in job.file_entries:
+                    parent_fid = self._resolve_target_parent_fid(
+                        entry.relative_path, resolved
+                    )
+                    attempts = 0
+                    while True:
+                        if cancel_token is not None:
+                            cancel_token.raise_if_cancelled()
+                        try:
+                            upload_result = call_with_supported_kwargs(
+                                self.uploader.upload_file,
+                                entry,
+                                parent_fid,
+                                cancel_token=cancel_token,
+                                progress_callback=progress_callback,
                             )
-                        if status_callback is not None:
-                            status_callback(
-                                FolderTaskStatus.UPLOADING.value,
-                                retry_count=retry_count,
-                            )
-                        break
-                    except UploadCancelled:
-                        raise
-                    except Exception as exc:
-                        if attempts >= self.file_retry_limit:
+                            uploaded_files += 1
+                            if job.source_type is TaskSourceType.FILE:
+                                remote_item_fid = str(
+                                    upload_result.get("finish", {})
+                                    .get("data", {})
+                                    .get("fid", "")
+                                )
+                            if status_callback is not None:
+                                status_callback(
+                                    FolderTaskStatus.UPLOADING.value,
+                                    retry_count=retry_count,
+                                )
+                            break
+                        except UploadCancelled:
                             raise
-                        attempts += 1
-                        retry_count += 1
-                        if status_callback is not None:
-                            status_callback(
-                                FolderTaskStatus.RETRYING.value, retry_count=retry_count
+                        except Exception as exc:
+                            if attempts >= self.file_retry_limit:
+                                raise
+                            attempts += 1
+                            retry_count += 1
+                            if status_callback is not None:
+                                status_callback(
+                                    FolderTaskStatus.RETRYING.value,
+                                    retry_count=retry_count,
+                                )
+                            self._log(
+                                f"[WARN] 重试上传文件：job={job.local_name} file={entry.relative_path} attempt={attempts} error={exc}"
                             )
-                        self._log(
-                            f"[WARN] 重试上传文件：job={job.local_name} file={entry.relative_path} attempt={attempts} error={exc}"
-                        )
-                        self._append_event(
-                            "WARN",
-                            "upload",
-                            "retry file upload",
-                            folder_name=job.local_name,
-                            file_name=entry.relative_path,
-                            attempt=attempts,
-                            retry_count=retry_count,
-                            error=str(exc),
-                        )
-                        self._sleep_for_retry(attempts)
+                            self._append_event(
+                                "WARN",
+                                "upload",
+                                "retry file upload",
+                                folder_name=job.local_name,
+                                file_name=entry.relative_path,
+                                attempt=attempts,
+                                retry_count=retry_count,
+                                error=str(exc),
+                            )
+                            self._sleep_for_retry(attempts)
+            else:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                from threading import Event, Lock
+
+                failure_event = Event()
+                uploaded_files_lock = Lock()
+                retry_lock = Lock()
+                remote_lock = Lock()
+                failure: Exception | None = None
+
+                def _upload_entry(entry) -> None:
+                    nonlocal retry_count, uploaded_files, remote_item_fid
+                    if failure_event.is_set():
+                        return
+                    parent_fid = self._resolve_target_parent_fid(
+                        entry.relative_path, resolved
+                    )
+                    attempts = 0
+                    while True:
+                        if cancel_token is not None:
+                            cancel_token.raise_if_cancelled()
+                        if failure_event.is_set():
+                            return
+                        try:
+                            upload_result = call_with_supported_kwargs(
+                                self.uploader.upload_file,
+                                entry,
+                                parent_fid,
+                                cancel_token=cancel_token,
+                                progress_callback=progress_callback,
+                            )
+                            with uploaded_files_lock:
+                                uploaded_files += 1
+                            if job.source_type is TaskSourceType.FILE:
+                                with remote_lock:
+                                    if not remote_item_fid:
+                                        remote_item_fid = str(
+                                            upload_result.get("finish", {})
+                                            .get("data", {})
+                                            .get("fid", "")
+                                        )
+                            if status_callback is not None:
+                                status_callback(
+                                    FolderTaskStatus.UPLOADING.value,
+                                    retry_count=retry_count,
+                                )
+                            return
+                        except UploadCancelled:
+                            raise
+                        except Exception as exc:
+                            if attempts >= self.file_retry_limit:
+                                failure_event.set()
+                                raise
+                            attempts += 1
+                            with retry_lock:
+                                retry_count += 1
+                            if status_callback is not None:
+                                status_callback(
+                                    FolderTaskStatus.RETRYING.value,
+                                    retry_count=retry_count,
+                                )
+                            self._log(
+                                f"[WARN] 重试上传文件：job={job.local_name} file={entry.relative_path} attempt={attempts} error={exc}"
+                            )
+                            self._append_event(
+                                "WARN",
+                                "upload",
+                                "retry file upload",
+                                folder_name=job.local_name,
+                                file_name=entry.relative_path,
+                                attempt=attempts,
+                                retry_count=retry_count,
+                                error=str(exc),
+                            )
+                            self._sleep_for_retry(attempts)
+
+                with ThreadPoolExecutor(
+                    max_workers=min(self.file_concurrency, len(job.file_entries))
+                ) as pool:
+                    futures = [pool.submit(_upload_entry, entry) for entry in job.file_entries]
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except UploadCancelled:
+                            raise
+                        except Exception as exc:
+                            failure = exc
+                            failure_event.set()
+
+                if failure is not None:
+                    raise failure
 
             share_id = ""
             share_url = ""

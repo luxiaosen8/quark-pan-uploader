@@ -112,6 +112,7 @@ class MainWindow(QWidget):
         self.log_flush_timer = QTimer(self)
         self.log_flush_timer.setInterval(120)
         self.log_flush_timer.timeout.connect(self._flush_log_buffer)
+        self._ui_update_interval_ms = 120
         self.controls_scroll = QScrollArea()
         self.controls_scroll.setWidgetResizable(True)
         self.controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -625,6 +626,8 @@ class MainWindow(QWidget):
         )
 
     def set_current_action(self, text: str) -> None:
+        if self.current_action_label.text() == text:
+            return
         self.current_action_label.setText(text)
 
     def set_selected_remote_folder(self, path: str | None) -> None:
@@ -639,6 +642,15 @@ class MainWindow(QWidget):
         self.select_local_folder_button.setVisible(is_batch)
         self.select_single_folder_button.setVisible(not is_batch)
         self.select_single_file_button.setVisible(not is_batch)
+
+    def set_ui_update_interval(self, interval_ms: int) -> None:
+        try:
+            interval = int(interval_ms)
+        except (TypeError, ValueError):
+            interval = 120
+        interval = max(50, min(1000, interval))
+        self._ui_update_interval_ms = interval
+        self.log_flush_timer.setInterval(interval)
 
     def _update_status_chip_style(self, state: str) -> None:
         self.status_label.setProperty("state", state)

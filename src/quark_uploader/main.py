@@ -20,6 +20,7 @@ from quark_uploader.quark.share_api import QuarkShareApi
 from quark_uploader.quark.task_api import QuarkTaskApi
 from quark_uploader.quark.upload_api import QuarkUploadApi
 from quark_uploader.quark.user_api import QuarkUserApi
+from quark_uploader.services.oss_transport import RequestsOssTransport
 from quark_uploader.services.quark_file_uploader import QuarkFileUploader
 from quark_uploader.services.refresh_service import DriveRefreshService
 from quark_uploader.services.remote_cleanup_service import RemoteCleanupService
@@ -84,6 +85,19 @@ def build_upload_executor(
     runtime_result_writer = result_writer or ResultWriter(
         resolve_runtime_path(runtime_settings.output_dir)
     )
+
+    def emit_upload_profile(payload: dict) -> None:
+        if runtime_result_writer is None:
+            return
+        phase = str(payload.get("phase", "profile"))
+        details = {k: v for k, v in payload.items() if k != "phase"}
+        runtime_result_writer.append_event(
+            "DEBUG",
+            "upload_profile",
+            phase,
+            **details,
+        )
+
     share_service = QuarkShareService(
         share_api=share_api,
         task_api=task_api,
@@ -92,12 +106,23 @@ def build_upload_executor(
         poll_interval_seconds=runtime_settings.share_poll_interval_seconds,
         logger=logger,
     )
+    pool_maxsize = max(
+        4,
+        min(
+            32,
+            runtime_settings.part_concurrency * runtime_settings.file_concurrency,
+        ),
+    )
+    oss_transport = RequestsOssTransport(pool_maxsize=pool_maxsize)
     return UploadExecutionEngine(
         directory_sync_service=RemoteDirectorySyncService(file_api),
         uploader=QuarkFileUploader(
             upload_api=upload_api,
+            oss_transport=oss_transport,
             logger=logger,
             part_concurrency=runtime_settings.part_concurrency,
+            verbose_logging=runtime_settings.debug_mode,
+            profile_callback=emit_upload_profile,
         ),
         share_service=share_service,
         result_writer=runtime_result_writer,
@@ -105,6 +130,7 @@ def build_upload_executor(
         file_retry_limit=runtime_settings.file_retry_limit,
         share_retry_limit=runtime_settings.share_retry_limit,
         retry_backoff_base_seconds=runtime_settings.retry_backoff_base_seconds,
+        file_concurrency=runtime_settings.file_concurrency,
     )
 
 
@@ -136,6 +162,7 @@ def build_main_window() -> MainWindow:
     write_startup_diagnostics(output_dir, settings_store.settings_path)
 
     window = MainWindow()
+    window.set_ui_update_interval(current_settings.ui_update_interval_ms)
     window._controller = MainWindowController(
         window=window,
         refresh_service_factory=lambda cookie: build_refresh_service(

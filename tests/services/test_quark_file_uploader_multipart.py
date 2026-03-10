@@ -32,6 +32,7 @@ class RecordingTransport:
         offset: int,
         size: int,
         cancel_token=None,
+        file_name: str | None = None,
     ):
         part_number = int(upload_url.split("partNumber=")[1].split("&")[0])
         self.calls.append(part_number)
@@ -53,12 +54,19 @@ class FailingTransport(RecordingTransport):
         offset: int,
         size: int,
         cancel_token=None,
+        file_name: str | None = None,
     ):
         part_number = int(upload_url.split("partNumber=")[1].split("&")[0])
         if part_number == 2:
             raise RuntimeError("part failed")
         return super().upload_part(
-            file_path, upload_url, headers, offset, size, cancel_token=cancel_token
+            file_path,
+            upload_url,
+            headers,
+            offset,
+            size,
+            cancel_token=cancel_token,
+            file_name=file_name,
         )
 
 
@@ -71,6 +79,7 @@ class StopAfterFirstPartTransport(RecordingTransport):
         offset: int,
         size: int,
         cancel_token=None,
+        file_name: str | None = None,
     ):
         part_number = int(upload_url.split("partNumber=")[1].split("&")[0])
         self.calls.append(part_number)

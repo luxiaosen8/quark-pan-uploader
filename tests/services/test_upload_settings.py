@@ -6,6 +6,7 @@ from quark_uploader.services.settings_store import AppSettingsStore
 from quark_uploader.settings import (
     AppSettings,
     DEFAULT_JOB_CONCURRENCY,
+    DEFAULT_FILE_CONCURRENCY,
     DEFAULT_PART_CONCURRENCY,
     DEFAULT_UI_UPDATE_INTERVAL_MS,
 )
@@ -15,16 +16,18 @@ def test_app_settings_uses_safe_defaults() -> None:
     settings = AppSettings()
 
     assert settings.job_concurrency == DEFAULT_JOB_CONCURRENCY
+    assert settings.file_concurrency == DEFAULT_FILE_CONCURRENCY
     assert settings.part_concurrency == DEFAULT_PART_CONCURRENCY
     assert settings.ui_update_interval_ms == DEFAULT_UI_UPDATE_INTERVAL_MS
 
 
 def test_app_settings_invalid_values_fall_back_to_defaults() -> None:
     settings = AppSettings(
-        job_concurrency=99, part_concurrency=0, ui_update_interval_ms=-1
+        job_concurrency=99, file_concurrency=0, part_concurrency=0, ui_update_interval_ms=-1
     )
 
     assert settings.job_concurrency == DEFAULT_JOB_CONCURRENCY
+    assert settings.file_concurrency == DEFAULT_FILE_CONCURRENCY
     assert settings.part_concurrency == DEFAULT_PART_CONCURRENCY
     assert settings.ui_update_interval_ms == DEFAULT_UI_UPDATE_INTERVAL_MS
 
@@ -47,4 +50,5 @@ def test_settings_store_loads_legacy_payload_without_new_fields(tmp_path) -> Non
 
     assert settings.output_dir == "output"
     assert settings.job_concurrency == DEFAULT_JOB_CONCURRENCY
+    assert settings.file_concurrency == DEFAULT_FILE_CONCURRENCY
     assert settings.part_concurrency == DEFAULT_PART_CONCURRENCY

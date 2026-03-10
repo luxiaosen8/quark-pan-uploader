@@ -31,12 +31,22 @@ class FakeUploadApi:
 
 class FakeOssTransport:
     def upload_single_part(
-        self, file_path: Path, upload_url: str, headers: dict, cancel_token=None
+        self,
+        file_path: Path,
+        upload_url: str,
+        headers: dict,
+        cancel_token=None,
+        file_name: str | None = None,
     ):
         return {"etag": "etag-1"}
 
     def complete_multipart_upload(
-        self, upload_url: str, headers: dict, xml_data: str, cancel_token=None
+        self,
+        upload_url: str,
+        headers: dict,
+        xml_data: str,
+        cancel_token=None,
+        file_name: str | None = None,
     ):
         return {"ok": True}
 

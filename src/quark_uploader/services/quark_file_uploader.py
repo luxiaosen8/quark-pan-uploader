@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -8,7 +8,8 @@ import mimetypes
 import struct
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
+from time import perf_counter
 
 from quark_uploader.quark.upload_api import (
     build_complete_multipart_xml,
@@ -41,16 +42,93 @@ MULTIPART_CHUNK_SIZE = 4 * 1024 * 1024
 
 class QuarkFileUploader:
     def __init__(
-        self, upload_api, oss_transport=None, logger=None, part_concurrency: int = 3
+        self,
+        upload_api,
+        oss_transport=None,
+        logger=None,
+        part_concurrency: int = 3,
+        *,
+        verbose_logging: bool = False,
+        profile_callback=None,
     ) -> None:
         self.upload_api = upload_api
         self.oss_transport = oss_transport or RequestsOssTransport()
+        if hasattr(self.oss_transport, "profile_callback"):
+            self.oss_transport.profile_callback = self._emit_transport_profile
         self.logger = logger
         self.part_concurrency = max(1, int(part_concurrency))
+        self.verbose_logging = verbose_logging
+        self.profile_callback = profile_callback
+        self._profile_lock = Lock()
+        self._profile_buckets: dict[str, dict[str, object]] = {}
 
-    def _log(self, message: str) -> None:
-        if self.logger is not None:
-            self.logger(message)
+    def _log(self, message: str, *, verbose: bool = False) -> None:
+        if self.logger is None:
+            return
+        if verbose and not self.verbose_logging:
+            return
+        self.logger(message)
+
+    def _record_profile(
+        self,
+        file_key: str,
+        phase: str,
+        elapsed_ms: float | None,
+        bytes_sent: int = 0,
+    ) -> None:
+        if elapsed_ms is None:
+            return
+        with self._profile_lock:
+            bucket = self._profile_buckets.setdefault(
+                file_key,
+                {
+                    "phases": {},
+                    "total_elapsed_ms": 0.0,
+                    "total_bytes_sent": 0,
+                    "events": 0,
+                },
+            )
+            phases = bucket["phases"]
+            phase_stats = phases.get(phase)
+            if phase_stats is None:
+                phase_stats = {"count": 0, "elapsed_ms": 0.0, "bytes_sent": 0}
+                phases[phase] = phase_stats
+            phase_stats["count"] += 1
+            phase_stats["elapsed_ms"] += float(elapsed_ms)
+            if bytes_sent:
+                phase_stats["bytes_sent"] += int(bytes_sent)
+                bucket["total_bytes_sent"] += int(bytes_sent)
+            bucket["total_elapsed_ms"] += float(elapsed_ms)
+            bucket["events"] += 1
+
+    def _consume_profile_bucket(self, file_key: str) -> dict[str, object] | None:
+        with self._profile_lock:
+            return self._profile_buckets.pop(file_key, None)
+
+    def _emit_profile(self, phase: str, file_name: str, **extra: object) -> None:
+        if phase != "file_summary":
+            elapsed_ms = extra.get("elapsed_ms")
+            bytes_sent = extra.get("bytes_sent", 0)
+            self._record_profile(
+                file_name,
+                phase,
+                elapsed_ms if isinstance(elapsed_ms, (int, float)) else None,
+                bytes_sent if isinstance(bytes_sent, (int, float)) else 0,
+            )
+        if self.profile_callback is None:
+            return
+        payload = {"phase": phase, "file_name": file_name}
+        payload.update(extra)
+        self.profile_callback(payload)
+
+    def _emit_transport_profile(self, payload: dict) -> None:
+        phase = payload.get("phase", "transport")
+        file_name = payload.get("file_name", "") or "transport"
+        extra = {k: v for k, v in payload.items() if k not in {"phase", "file_name"}}
+        self._emit_profile(f"transport_{phase}", file_name, **extra)
+
+    def _elapsed_ms(self, started_at: float) -> float:
+        return round((perf_counter() - started_at) * 1000, 2)
 
     def _emit_progress(self, callback, **payload) -> None:
         if callback is not None:
@@ -66,108 +144,161 @@ class QuarkFileUploader:
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
         path = Path(file_entry.absolute_path)
-        self._log(
-            f"[DEBUG] 文件上传开始：name={path.name} size={file_entry.size_bytes} target_parent_fid={target_parent_fid}"
-        )
-        self._emit_progress(
-            progress_callback,
-            phase="file_start",
-            file_name=path.name,
-            part_number=0,
-            part_total=0,
-        )
-        mime_type, _ = mimetypes.guess_type(str(path))
-        mime_type = mime_type or "application/octet-stream"
-        md5_hash, sha1_hash, multipart_contexts = (
-            self._calculate_hashes_and_multipart_contexts(path)
-        )
-        self._log(
-            f"[DEBUG] 文件哈希已计算：md5={md5_hash[:8]}... sha1={sha1_hash[:8]}..."
-        )
-        pre_payload = build_upload_pre_payload(
-            file_name=path.name,
-            file_size=file_entry.size_bytes,
-            parent_fid=target_parent_fid,
-            mime_type=mime_type,
-        )
-        self._log(f"[DEBUG] 预上传请求：file={path.name} size={file_entry.size_bytes}")
-        self._emit_progress(
-            progress_callback,
-            phase="preupload",
-            file_name=path.name,
-            part_number=0,
-            part_total=0,
-        )
-        pre_result = self.upload_api.preupload(pre_payload)
-        data = pre_result.get("data", {})
-        task_id = data.get("task_id", "")
-        upload_id = data.get("upload_id", "")
-        bucket = data.get("bucket", "ul-zb")
-        self._log(
-            f"[DEBUG] 预上传成功：task_id={task_id} upload_id={upload_id} bucket={bucket}"
-        )
-        auth_info = data.get("auth_info", "")
-        obj_key = data.get("obj_key", "")
-        callback_info = data.get("callback") or {}
-        self.upload_api.update_hash(
-            build_hash_update_payload(task_id, md5_hash, sha1_hash)
-        )
-        self._log(f"[DEBUG] 更新哈希完成：task_id={task_id}")
+        display_name = path.name
+        profile_key = file_entry.relative_path or display_name
+        file_started = perf_counter()
+        success = False
+        try:
+            self._log(
+                f"[DEBUG] 文件上传开始：name={display_name} size={file_entry.size_bytes} target_parent_fid={target_parent_fid}",
+                verbose=True,
+            )
+            self._emit_progress(
+                progress_callback,
+                phase="file_start",
+                file_name=display_name,
+                part_number=0,
+                part_total=0,
+            )
+            mime_type, _ = mimetypes.guess_type(str(path))
+            mime_type = mime_type or "application/octet-stream"
+            hash_started = perf_counter()
+            md5_hash, sha1_hash, multipart_contexts = (
+                self._calculate_hashes_and_multipart_contexts(path)
+            )
+            self._emit_profile(
+                "hash_calculated",
+                profile_key,
+                elapsed_ms=self._elapsed_ms(hash_started),
+            )
+            self._log(
+                f"[DEBUG] 文件哈希已计算：md5={md5_hash[:8]}... sha1={sha1_hash[:8]}...",
+                verbose=True,
+            )
+            pre_payload = build_upload_pre_payload(
+                file_name=display_name,
+                file_size=file_entry.size_bytes,
+                parent_fid=target_parent_fid,
+                mime_type=mime_type,
+            )
+            self._emit_progress(
+                progress_callback,
+                phase="preupload",
+                file_name=display_name,
+                part_number=0,
+                part_total=0,
+            )
+            pre_started = perf_counter()
+            pre_result = self.upload_api.preupload(pre_payload)
+            self._emit_profile(
+                "preupload_request",
+                profile_key,
+                elapsed_ms=self._elapsed_ms(pre_started),
+            )
+            data = pre_result.get("data", {})
+            task_id = data.get("task_id", "")
+            upload_id = data.get("upload_id", "")
+            bucket = data.get("bucket", "ul-zb")
+            self._log(
+                f"[DEBUG] 预上传成功：task_id={task_id} upload_id={upload_id} bucket={bucket}",
+                verbose=True,
+            )
+            auth_info = data.get("auth_info", "")
+            obj_key = data.get("obj_key", "")
+            callback_info = data.get("callback") or {}
+            update_started = perf_counter()
+            self.upload_api.update_hash(
+                build_hash_update_payload(task_id, md5_hash, sha1_hash)
+            )
+            self._emit_profile(
+                "hash_update",
+                profile_key,
+                elapsed_ms=self._elapsed_ms(update_started),
+            )
+            self._log(f"[DEBUG] 更新哈希完成：task_id={task_id}", verbose=True)
 
-        auth_result = None
-        oss_upload = None
-        multipart_complete = None
-        if auth_info and obj_key and upload_id:
-            if file_entry.size_bytes <= SINGLE_PART_MAX_BYTES:
-                auth_result, oss_upload, multipart_complete = self._upload_single_part(
-                    path=path,
-                    task_id=task_id,
-                    auth_info=auth_info,
-                    obj_key=obj_key,
-                    upload_id=upload_id,
-                    bucket=bucket,
-                    mime_type=mime_type,
-                    callback_info=callback_info,
-                    cancel_token=cancel_token,
-                    progress_callback=progress_callback,
-                )
-            else:
-                auth_result, multipart_complete = self._upload_multiple_parts(
-                    path=path,
-                    task_id=task_id,
-                    auth_info=auth_info,
-                    obj_key=obj_key,
-                    upload_id=upload_id,
-                    bucket=bucket,
-                    mime_type=mime_type,
-                    callback_info=callback_info,
-                    hash_contexts=multipart_contexts,
-                    cancel_token=cancel_token,
-                    progress_callback=progress_callback,
-                )
+            auth_result = None
+            oss_upload = None
+            multipart_complete = None
+            if auth_info and obj_key and upload_id:
+                if file_entry.size_bytes <= SINGLE_PART_MAX_BYTES:
+                    auth_result, oss_upload, multipart_complete = self._upload_single_part(
+                        path=path,
+                        task_id=task_id,
+                        auth_info=auth_info,
+                        obj_key=obj_key,
+                        upload_id=upload_id,
+                        bucket=bucket,
+                        mime_type=mime_type,
+                        callback_info=callback_info,
+                        cancel_token=cancel_token,
+                        progress_callback=progress_callback,
+                        display_name=display_name,
+                        profile_key=profile_key,
+                    )
+                else:
+                    auth_result, multipart_complete = self._upload_multiple_parts(
+                        path=path,
+                        task_id=task_id,
+                        auth_info=auth_info,
+                        obj_key=obj_key,
+                        upload_id=upload_id,
+                        bucket=bucket,
+                        mime_type=mime_type,
+                        callback_info=callback_info,
+                        hash_contexts=multipart_contexts,
+                        cancel_token=cancel_token,
+                        progress_callback=progress_callback,
+                        display_name=display_name,
+                        profile_key=profile_key,
+                    )
 
-        if cancel_token is not None:
-            cancel_token.raise_if_cancelled()
-        self._log(f"[DEBUG] 调用 finish：task_id={task_id} obj_key={obj_key}")
-        self._emit_progress(
-            progress_callback,
-            phase="finish",
-            file_name=path.name,
-            part_number=0,
-            part_total=0,
-        )
-        finish_result = self.upload_api.finish(
-            build_upload_finish_payload(task_id, obj_key or None)
-        )
-        self._log(f"[DEBUG] finish 完成：task_id={task_id}")
-        return {
-            "task_id": task_id,
-            "preupload": pre_result,
-            "auth": auth_result,
-            "oss_upload": oss_upload,
-            "multipart_complete": multipart_complete,
-            "finish": finish_result,
-        }
+            if cancel_token is not None:
+                cancel_token.raise_if_cancelled()
+            self._log(f"[DEBUG] 调用 finish：task_id={task_id} obj_key={obj_key}", verbose=True)
+            finish_started = perf_counter()
+            self._emit_progress(
+                progress_callback,
+                phase="finish",
+                file_name=display_name,
+                part_number=0,
+                part_total=0,
+            )
+            finish_result = self.upload_api.finish(
+                build_upload_finish_payload(task_id, obj_key or None)
+            )
+            self._emit_profile(
+                "finish",
+                profile_key,
+                elapsed_ms=self._elapsed_ms(finish_started),
+            )
+            self._log(f"[DEBUG] finish 完成：task_id={task_id}", verbose=True)
+            success = True
+            return {
+                "task_id": task_id,
+                "preupload": pre_result,
+                "auth": auth_result,
+                "oss_upload": oss_upload,
+                "multipart_complete": multipart_complete,
+                "finish": finish_result,
+            }
+        finally:
+            summary = self._consume_profile_bucket(profile_key) or {
+                "phases": {},
+                "total_elapsed_ms": 0.0,
+                "total_bytes_sent": 0,
+                "events": 0,
+            }
+            self._emit_profile(
+                "file_summary",
+                profile_key,
+                status="success" if success else "failed",
+                total_elapsed_ms=self._elapsed_ms(file_started),
+                total_profiled_ms=summary.get("total_elapsed_ms", 0.0),
+                total_profiled_bytes=summary.get("total_bytes_sent", 0),
+                phase_stats=summary.get("phases", {}),
+                events=summary.get("events", 0),
+            )
 
     def _upload_single_part(
         self,
@@ -181,8 +312,20 @@ class QuarkFileUploader:
         callback_info: dict,
         cancel_token: UploadCancellationToken | None = None,
         progress_callback=None,
+        display_name: str | None = None,
+        profile_key: str | None = None,
     ):
+        display_name = display_name or path.name
+        profile_key = profile_key or display_name
         oss_date = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+        self._log(f"[DEBUG] 获取单分片上传授权：part=1 upload_id={upload_id}", verbose=True)
+        self._emit_progress(
+            progress_callback,
+            phase="part_upload",
+            file_name=display_name,
+            part_number=1,
+            part_total=1,
+        )
         auth_meta = build_put_auth_meta(
             mime_type=mime_type,
             oss_date=oss_date,
@@ -192,18 +335,16 @@ class QuarkFileUploader:
             part_number=1,
             user_agent=DEFAULT_OSS_USER_AGENT,
         )
-        self._log(f"[DEBUG] 获取单分片上传授权：part=1 upload_id={upload_id}")
-        self._emit_progress(
-            progress_callback,
-            phase="part_upload",
-            file_name=path.name,
+        auth_started = perf_counter()
+        auth_result = self.upload_api.get_upload_auth(
+            build_upload_auth_payload(task_id=task_id, auth_info=auth_info, auth_meta=auth_meta)
+        )
+        self._emit_profile(
+            "auth_request",
+            profile_key,
+            elapsed_ms=self._elapsed_ms(auth_started),
             part_number=1,
             part_total=1,
-        )
-        auth_result = self.upload_api.get_upload_auth(
-            build_upload_auth_payload(
-                task_id=task_id, auth_info=auth_info, auth_meta=auth_meta
-            )
         )
         parsed_auth = parse_upload_auth_result(
             auth_result=auth_result,
@@ -220,8 +361,9 @@ class QuarkFileUploader:
             parsed_auth["upload_url"],
             parsed_auth["headers"],
             cancel_token=cancel_token,
+            file_name=profile_key,
         )
-        self._log(f"[DEBUG] 单分片上传完成：etag={oss_upload.get('etag', '')}")
+        self._log(f"[DEBUG] 单分片上传完成：etag={oss_upload.get('etag', '')}", verbose=True)
         xml_data = build_complete_multipart_xml([oss_upload["etag"]])
         complete_oss_date = datetime.now(timezone.utc).strftime(
             "%a, %d %b %Y %H:%M:%S GMT"
@@ -235,11 +377,18 @@ class QuarkFileUploader:
             callback_info=callback_info,
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
-        self._log("[DEBUG] 获取单分片合并授权")
+        self._log("[DEBUG] 获取单分片合并授权", verbose=True)
+        complete_auth_started = perf_counter()
         complete_auth_result = self.upload_api.get_upload_auth(
             build_upload_auth_payload(
                 task_id=task_id, auth_info=auth_info, auth_meta=complete_auth_meta
             )
+        )
+        self._emit_profile(
+            "complete_auth_request",
+            profile_key,
+            elapsed_ms=self._elapsed_ms(complete_auth_started),
+            part_total=1,
         )
         parsed_complete = parse_complete_upload_auth_result(
             auth_result=complete_auth_result,
@@ -251,20 +400,28 @@ class QuarkFileUploader:
             oss_date=complete_oss_date,
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
-        self._log("[DEBUG] 单分片开始执行 OSS 合并完成")
+        self._log("[DEBUG] 单分片开始执行 OSS 合并完成", verbose=True)
         self._emit_progress(
             progress_callback,
             phase="complete",
-            file_name=path.name,
+            file_name=display_name,
             part_number=1,
             part_total=1,
         )
+        complete_started = perf_counter()
         multipart_complete = call_with_supported_kwargs(
             self.oss_transport.complete_multipart_upload,
             parsed_complete["upload_url"],
             parsed_complete["headers"],
             xml_data,
             cancel_token=cancel_token,
+            file_name=profile_key,
+        )
+        self._emit_profile(
+            "complete_execute",
+            profile_key,
+            elapsed_ms=self._elapsed_ms(complete_started),
+            part_total=1,
         )
         return complete_auth_result, oss_upload, multipart_complete
 
@@ -281,14 +438,19 @@ class QuarkFileUploader:
         hash_contexts: list[str],
         cancel_token: UploadCancellationToken | None = None,
         progress_callback=None,
+        display_name: str | None = None,
+        profile_key: str | None = None,
     ):
         if not callback_info:
             raise NotImplementedError("多分片上传需要 callback 信息")
+        display_name = display_name or path.name
+        profile_key = profile_key or display_name
         auth_result = None
         file_size = path.stat().st_size
         part_total = (file_size + MULTIPART_CHUNK_SIZE - 1) // MULTIPART_CHUNK_SIZE
         self._log(
-            f"[DEBUG] 进入多分片上传：file_size={file_size} chunk_size={MULTIPART_CHUNK_SIZE}"
+            f"[DEBUG] 进入多分片上传：file_size={file_size} chunk_size={MULTIPART_CHUNK_SIZE}",
+            verbose=True,
         )
         part_jobs: list[tuple[int, int, int, str]] = []
         offset = 0
@@ -328,6 +490,8 @@ class QuarkFileUploader:
                         progress_callback,
                         part_total,
                         job,
+                        display_name,
+                        profile_key,
                     )
                 ] = job
                 next_index += 1
@@ -380,6 +544,8 @@ class QuarkFileUploader:
                             progress_callback,
                             part_total,
                             job,
+                            display_name,
+                            profile_key,
                         )
                     ] = job
                     next_index += 1
@@ -401,11 +567,18 @@ class QuarkFileUploader:
             callback_info=callback_info,
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
-        self._log(f"[DEBUG] 获取多分片合并授权：parts={len(ordered_part_etags)}")
+        self._log(f"[DEBUG] 获取多分片合并授权：parts={len(ordered_part_etags)}", verbose=True)
+        complete_auth_started = perf_counter()
         complete_auth_result = self.upload_api.get_upload_auth(
             build_upload_auth_payload(
                 task_id=task_id, auth_info=auth_info, auth_meta=complete_auth_meta
             )
+        )
+        self._emit_profile(
+            "complete_auth_request",
+            profile_key,
+            elapsed_ms=self._elapsed_ms(complete_auth_started),
+            part_total=part_total,
         )
         parsed_complete = parse_complete_upload_auth_result(
             auth_result=complete_auth_result,
@@ -417,13 +590,21 @@ class QuarkFileUploader:
             oss_date=complete_oss_date,
             user_agent=DEFAULT_COMPLETE_USER_AGENT,
         )
-        self._log("[DEBUG] 开始执行多分片 OSS 合并完成")
+        self._log("[DEBUG] 开始执行多分片 OSS 合并完成", verbose=True)
+        complete_started = perf_counter()
         multipart_complete = call_with_supported_kwargs(
             self.oss_transport.complete_multipart_upload,
             parsed_complete["upload_url"],
             parsed_complete["headers"],
             xml_data,
             cancel_token=cancel_token,
+            file_name=profile_key,
+        )
+        self._emit_profile(
+            "complete_execute",
+            profile_key,
+            elapsed_ms=self._elapsed_ms(complete_started),
+            part_total=part_total,
         )
         return complete_auth_result, multipart_complete
 
@@ -440,17 +621,22 @@ class QuarkFileUploader:
         progress_callback,
         part_total: int,
         part_job: tuple[int, int, int, str],
+        display_name: str | None = None,
+        profile_key: str | None = None,
     ) -> tuple[int, dict, str]:
         part_number, offset, part_size, hash_ctx = part_job
         cancel_token.raise_if_cancelled()
+        display_name = display_name or path.name
+        profile_key = profile_key or display_name
         oss_date = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
         self._log(
-            f"[DEBUG] 获取分片上传授权：part={part_number} offset={offset} size={part_size} hash_ctx={'yes' if hash_ctx else 'no'}"
+            f"[DEBUG] 获取分片上传授权：part={part_number} offset={offset} size={part_size} hash_ctx={'yes' if hash_ctx else 'no'}",
+            verbose=True,
         )
         self._emit_progress(
             progress_callback,
             phase="part_upload",
-            file_name=path.name,
+            file_name=display_name,
             part_number=part_number,
             part_total=part_total,
         )
@@ -464,10 +650,18 @@ class QuarkFileUploader:
             user_agent=DEFAULT_OSS_USER_AGENT,
             hash_ctx=hash_ctx,
         )
+        auth_started = perf_counter()
         auth_result = self.upload_api.get_upload_auth(
             build_upload_auth_payload(
                 task_id=task_id, auth_info=auth_info, auth_meta=auth_meta
             )
+        )
+        self._emit_profile(
+            "auth_request",
+            profile_key,
+            elapsed_ms=self._elapsed_ms(auth_started),
+            part_number=part_number,
+            part_total=part_total,
         )
         parsed_auth = parse_upload_auth_result(
             auth_result=auth_result,
@@ -488,9 +682,11 @@ class QuarkFileUploader:
             offset=offset,
             size=part_size,
             cancel_token=cancel_token,
+            file_name=profile_key,
         )
         self._log(
-            f"[DEBUG] 分片上传完成：part={part_number} etag={put_result.get('etag', '')}"
+            f"[DEBUG] 分片上传完成：part={part_number} etag={put_result.get('etag', '')}",
+            verbose=True,
         )
         return part_number, auth_result, put_result["etag"]
 
